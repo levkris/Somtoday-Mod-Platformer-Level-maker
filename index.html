@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Level Builder</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="hdr">
+  <span class="hdr-logo">Level Builder</span>
+  <div class="hdr-sep"></div>
+  <div class="tool-seg">
+    <button class="btn active" id="tool-select" onclick="setTool('select')" title="V">Select</button>
+    <button class="btn" id="tool-place" onclick="setTool('place')" title="P">Place</button>
+    <button class="btn" id="tool-pan" onclick="setTool('pan')" title="H">Pan</button>
+  </div>
+  <div class="hdr-sep"></div>
+  <button class="btn" onclick="undo()" title="Ctrl+Z">Undo</button>
+  <button class="btn" onclick="redo()" title="Ctrl+Y">Redo</button>
+  <div class="hdr-sep"></div>
+  <button class="btn" onclick="duplicateSelected()" title="Ctrl+D">Duplicate</button>
+  <button class="btn" onclick="groupSelected()" title="Ctrl+G">Group</button>
+  <button class="btn" onclick="ungroupSelected()">Ungroup</button>
+  <button class="btn danger" onclick="deleteSelected()" title="Del">Delete</button>
+  <div class="hdr-spacer"></div>
+  <button class="btn" onclick="fitView()" title="Ctrl+0">Fit</button>
+  <div class="zoom-grp">
+    <button class="btn sm" onclick="changeZoom(-0.15)">-</button>
+    <span class="zoom-lbl" id="zoom-lbl">100%</span>
+    <button class="btn sm" onclick="changeZoom(0.15)">+</button>
+  </div>
+  <div class="hdr-sep"></div>
+  <button class="btn" onclick="openImport()">Import</button>
+  <button class="btn accent" onclick="openExport()">Export XML</button>
+  <button class="btn" onclick="exportZip()">Export ZIP</button>
+  <button class="btn" onclick="openShortcuts()">Keys ?</button>
+</div>
+
+<div class="workspace">
+  <div class="left-panel">
+    <div class="panel-tabs">
+      <button class="panel-tab active" onclick="switchLeft('objects',this)">Objects</button>
+      <button class="panel-tab" onclick="switchLeft('hierarchy',this)">Hierarchy</button>
+    </div>
+    <div class="panel-content active" id="ltab-objects">
+      <div class="obj-type-list" id="obj-type-list"></div>
+    </div>
+    <div class="panel-content" id="ltab-hierarchy">
+      <div class="hier-header">
+        <input class="hier-search" id="hier-search" placeholder="Filter..." oninput="buildHierarchy(this.value)">
+      </div>
+      <div class="hier-list" id="hier-list"></div>
+    </div>
+  </div>
+
+  <div class="canvas-wrap" id="canvas-wrap">
+    <canvas id="canvas"></canvas>
+    <div class="minimap-wrap">
+      <canvas id="minimap" width="148" height="74"></canvas>
+      <div class="minimap-vp" id="minimap-vp"></div>
+    </div>
+  </div>
+
+  <div class="right-panel">
+    <div class="right-tabs">
+      <button class="right-tab active" onclick="switchRight('props',this)">Properties</button>
+      <button class="right-tab" onclick="switchRight('textures',this)">Textures</button>
+    </div>
+    <div class="right-content active" id="rtab-props">
+      <div class="props-hdr">
+        <span class="props-title" id="props-title">Properties</span>
+        <span class="props-type" id="props-type"></span>
+      </div>
+      <div class="props-body" id="props-body"></div>
+    </div>
+    <div class="right-content" id="rtab-textures">
+      <div class="storage-bar-wrap" id="storage-bar-wrap">
+        <div class="storage-bar-labels"><span>Storage</span><span id="storage-lbl">calculating...</span></div>
+        <div class="storage-bar-track"><div class="storage-bar-fill" id="storage-bar-fill"></div></div>
+      </div>
+      <div class="tex-panel-body">
+        <div class="tex-drop" id="tex-drop" onclick="document.getElementById('tex-file').click()" ondragover="clsAdd(event,'tex-drop','over')" ondragleave="clsRm('tex-drop','over')" ondrop="texDrop(event)">
+          <input type="file" id="tex-file" multiple accept="image/*" onchange="texFilePicked(event)">
+          <div style="font-size:12px;color:var(--text);margin-bottom:3px">Upload Textures</div>
+          <div>Click or drag images here</div>
+          <div style="font-size:8px;margin-top:3px;color:var(--muted)">Auto-matched to objects by filename</div>
+        </div>
+        <div class="tex-grid" id="tex-grid"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="statusbar">
+  <span><span class="sdot"></span>Ready</span>
+  <span id="sb-coords">X: 0  Y: 0</span>
+  <span id="sb-count">0 objects</span>
+  <span>Grid:<input type="checkbox" id="grid-chk" checked onchange="showGrid=this.checked;render()" style="cursor:pointer;margin-left:3px"></span>
+  <span>Snap:<input type="checkbox" id="snap-chk" checked style="cursor:pointer;margin-left:3px">
+    <select id="snap-sel" onchange="snapSize=+this.value" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:1px 3px;border-radius:3px;font-size:9px;font-family:var(--font-mono);height:18px;margin-left:2px">
+      <option>1</option><option>5</option><option>10</option><option value="20" selected>20</option><option>40</option><option>50</option>
+    </select>px
+  </span>
+  <span id="sb-sel" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Nothing selected</span>
+</div>
+
+<!-- Modals -->
+<div class="modal-bg" id="modal-import">
+  <div class="modal">
+    <h2>Import Level</h2>
+    <div class="drop-zone" id="xml-drop" onclick="document.getElementById('xml-file').click()" ondragover="clsAdd(event,'xml-drop','over')" ondragleave="clsRm('xml-drop','over')" ondrop="xmlDropFile(event)">
+      <input type="file" id="xml-file" accept=".xml,text/xml,.zip,application/zip" onchange="xmlFilePicked(event)">
+      <div style="font-size:12px;color:var(--text);margin-bottom:3px">Upload .xml or .zip file</div>
+      <div>Click or drag your level file here</div>
+    </div>
+    <div class="modal-div">- or paste XML below -</div>
+    <textarea id="import-xml" placeholder="Paste XML here..."></textarea>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-import')">Cancel</button>
+      <button class="btn accent" onclick="doImportText()">Import</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-export">
+  <div class="modal">
+    <h2>Export XML</h2>
+    <textarea id="export-xml" readonly></textarea>
+    <div class="modal-actions">
+      <button class="btn" onclick="copyXML()">Copy</button>
+      <button class="btn" onclick="downloadXML()">Download</button>
+      <button class="btn accent" onclick="closeModal('modal-export')">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-keys">
+  <div class="modal sc-modal">
+    <h2>Keyboard Shortcuts</h2>
+    <div class="sc-grid" id="sc-grid"></div>
+    <div class="modal-actions"><button class="btn accent" onclick="closeModal('modal-keys')">Close</button></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-restore">
+  <div class="modal sm">
+    <h2>Restore session?</h2>
+    <p>A saved session was found. Do you want to restore it?</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-restore')">Start fresh</button>
+      <button class="btn accent" onclick="doRestore()">Restore</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-rename-group">
+  <div class="modal sm">
+    <h2>Rename Group</h2>
+    <div class="field" style="margin:0">
+      <label>New name</label>
+      <input type="text" id="rename-group-input" style="width:100%">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-rename-group')">Cancel</button>
+      <button class="btn accent" onclick="doRenameGroup()">Rename</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-unsaved-exit">
+  <div class="modal sm">
+    <h2>Unsaved changes</h2>
+    <p>Your project is too large to auto-save. Export a ZIP before leaving to avoid losing your work.</p>
+    <div class="modal-actions">
+      <button class="btn danger" id="unsaved-leave-btn">Leave anyway</button>
+      <button class="btn" onclick="closeModal('modal-unsaved-exit')">Cancel</button>
+      <button class="btn accent" onclick="exportZip();closeModal('modal-unsaved-exit')">Export ZIP</button>
+    </div>
+  </div>
+</div>
+
+<div class="ctx-menu" id="ctx-menu">
+  <div class="ctx-item" onclick="ctxDupe()">Duplicate<span class="ctx-sc">Ctrl+D</span></div>
+  <div class="ctx-item" onclick="ctxUp()">Move Up<span class="ctx-sc">]</span></div>
+  <div class="ctx-item" onclick="ctxDown()">Move Down<span class="ctx-sc">[</span></div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" onclick="ctxCopy()">Copy<span class="ctx-sc">Ctrl+C</span></div>
+  <div class="ctx-item" onclick="ctxPaste()">Paste<span class="ctx-sc">Ctrl+V</span></div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" onclick="groupSelected()">Group<span class="ctx-sc">Ctrl+G</span></div>
+  <div class="ctx-item" onclick="ungroupSelected()">Ungroup</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item danger" onclick="deleteSelected()">Delete<span class="ctx-sc">Del</span></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="data.js"></script>
+<script src="state.js"></script>
+<script src="storage.js"></script>
+<script src="canvas.js"></script>
+<script src="draw.js"></script>
+<script src="ui.js"></script>
+<script src="props.js"></script>
+<script src="xml.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
