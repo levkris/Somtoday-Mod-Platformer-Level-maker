@@ -11,7 +11,8 @@ function buildXML() {
     ['worldWidth', level.worldWidth], ['worldHeight', level.worldHeight],
     ['spawnX', level.spawnX], ['spawnY', level.spawnY],
     ['bgColor', level.bgColor], ['bgColor2', level.bgColor2],
-    ['bgTexture', level.bgTexture],
+    ['bgTexture', level.bgTexture], ['bgTextureMode', level.bgTextureMode],
+    ['bgTextureAlpha', level.bgTextureAlpha],
   ].forEach(kv => { if (kv[1] !== '' && kv[1] != null) xml += ' ' + kv[0] + '="' + esc(kv[1]) + '"'; });
   xml += '>\n';
 
@@ -79,29 +80,39 @@ async function readZipFile(f) {
     const zip = await JSZip.loadAsync(f);
     let xmlFile = null;
     const newTextures = {};
-    const texPromises = [];
+    const newSongs = {};
+    const promises = [];
     zip.forEach((path, entry) => {
       if (entry.dir) return;
       const name = path.split('/').pop();
       if (!xmlFile && name.endsWith('.xml')) { xmlFile = entry; }
       else if (/\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name)) {
-        texPromises.push(
+        promises.push(
           entry.async('base64').then(b64 => {
             const ext = name.split('.').pop().toLowerCase();
             const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : ext === 'svg' ? 'image/svg+xml' : 'image/png';
             newTextures[name] = 'data:' + mime + ';base64,' + b64;
           })
         );
+      } else if (/\.(mp3|ogg|wav|m4a|flac)$/i.test(name)) {
+        promises.push(
+          entry.async('base64').then(b64 => {
+            const ext = name.split('.').pop().toLowerCase();
+            const mime = ext === 'mp3' ? 'audio/mpeg' : ext === 'ogg' ? 'audio/ogg' : 'audio/' + ext;
+            newSongs[name] = 'data:' + mime + ';base64,' + b64;
+          })
+        );
       }
     });
     if (!xmlFile) { toast('No level.xml found in ZIP', true); return; }
-    const [xmlText] = await Promise.all([xmlFile.async('text'), ...texPromises]);
+    const [xmlText] = await Promise.all([xmlFile.async('text'), ...promises]);
     Object.assign(textures, newTextures);
+    Object.assign(songs, newSongs);
     Object.keys(texImgCache).forEach(k => { if (newTextures[k]) delete texImgCache[k]; });
     parseXML(xmlText);
-    buildTexPanel(); saveTextures();
-    const tc = Object.keys(newTextures).length;
-    toast('ZIP imported' + (tc ? ' - ' + tc + ' texture' + (tc > 1 ? 's' : '') : ''));
+    buildTexPanel(); buildSongPanel(); saveTextures(); saveSongs();
+    const tc = Object.keys(newTextures).length + Object.keys(newSongs).length;
+    toast('ZIP imported' + (tc ? ' - ' + tc + ' asset' + (tc > 1 ? 's' : '') : ''));
   } catch (err) { toast('ZIP error: ' + err.message, true); }
 }
 

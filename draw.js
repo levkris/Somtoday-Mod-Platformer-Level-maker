@@ -170,6 +170,13 @@ function drawObj(o) {
   ctx.restore();
 }
 
+function getObjFontStr(o) {
+  const fam = o.fontFamily || 'sans-serif';
+  const sz = o.fontSize || 20;
+  const bold = o.bold ? 'bold ' : '';
+  return bold + sz + 'px ' + fam;
+}
+
 function drawShape(o, col, lx, ly, lw, lh, inT) {
   const texImg = getTexImg(o);
   const vTex = texImg && texImg.complete && texImg.naturalWidth > 0;
@@ -307,20 +314,18 @@ function drawShape(o, col, lx, ly, lw, lh, inT) {
 
   } else if (o.type === 'text') {
     const tc = inT ? { x: lx + lw / 2, y: ly + lh / 2 } : g2c(o.x, o.y, 0);
-    const fontStr = o.font || '20px sans-serif';
-    const m = fontStr.match(/(\d+)px/);
-    const bp = m ? Math.max(8, parseFloat(m[1]) * zoom * 0.7) : 14;
-    const fr = fontStr.replace(/(?:bold\s*)?\d+px/, '').trim() || 'sans-serif';
+    const fontStr = getObjFontStr(o);
+    const scaled = fontStr.replace(/(\d+)px/, (_, n) => Math.max(8, parseFloat(n) * zoom * 0.7) + 'px');
     const raw = o._rawContent || o.content || 'Text';
     ctx.textBaseline = 'middle';
     if (raw.includes('<')) {
-      const segs = parseSegs(raw, false, o.color || '#fff');
+      const segs = parseSegs(raw, !!o.bold, o.color || '#fff');
       ctx.textAlign = 'left';
       let tw = 0;
-      segs.forEach(s => { ctx.font = (s.bold ? 'bold ' : '') + bp + 'px ' + fr; tw += ctx.measureText(s.t).width; });
+      segs.forEach(s => { ctx.font = (s.bold ? 'bold ' : '') + scaled.replace(/^bold\s*/, ''); tw += ctx.measureText(s.t).width; });
       let cx = tc.x - tw / 2;
       segs.forEach(s => {
-        ctx.font = (s.bold ? 'bold ' : '') + bp + 'px ' + fr;
+        ctx.font = (s.bold ? 'bold ' : '') + scaled.replace(/^bold\s*/, '');
         ctx.fillStyle = s.color;
         const sw = ctx.measureText(s.t).width;
         ctx.fillText(s.t, cx, tc.y);
@@ -328,7 +333,7 @@ function drawShape(o, col, lx, ly, lw, lh, inT) {
       });
     } else {
       ctx.textAlign = 'center';
-      ctx.font = bp + 'px ' + fr;
+      ctx.font = scaled;
       ctx.fillStyle = o.color || '#fff';
       ctx.fillText(raw, tc.x, tc.y);
     }

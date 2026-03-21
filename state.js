@@ -30,6 +30,7 @@ let redoStack = [];
 let spaceHeld = false;
 let clipboard = null;
 let textures = {};
+let songs = {};
 let texImgCache = {};
 let idCtr = 1;
 let mwx = 0;
@@ -61,7 +62,7 @@ function defaultObj(type) {
     key:                 { x: 0, y: 0, r: 16, keyId: 'key_1', color: '#ffd700' },
     checkpoint:          { x: 0, y: 0 },
     end:                 { x: 0, y: 0, w: 200, h: 100 },
-    text:                { x: 0, y: 0, content: 'Sample text', color: '#ffffff', font: '20px sans-serif', ghost: false },
+    text:                { x: 0, y: 0, content: 'Sample text', color: '#ffffff', fontFamily: 'sans-serif', fontSize: 20, bold: false, ghost: false },
     portal:              { x: 0, y: 0, w: 40, h: 200, 'portal-id': 'p1', 'to-portal-id': 'p2' },
     area:                { x: 0, y: 0, w: 300, h: 300, id: 'area1', checkpointX: '', checkpointY: '' },
     camera:              { x: 0, y: 0, areaId: 'area1', lockX: false, lockY: false, targetCamX: '', targetCamY: '' },
@@ -134,7 +135,6 @@ function applyRect(o, nx, ny, nw, nh, moveX, moveY) {
   if (moveY) o.y = sn(ny);
 }
 
-// Game coords: Y increases upward. Screen coords: Y increases downward.
 function g2c(gx, gy, gh) {
   return { x: pan.x + gx * zoom, y: pan.y + (level.worldHeight - gy - (gh || 0)) * zoom };
 }
@@ -142,7 +142,8 @@ function s2g(sx, sy) {
   return { x: (sx - pan.x) / zoom, y: level.worldHeight - ((sy - pan.y) / zoom) };
 }
 function sn(v) {
-  return document.getElementById('snap-chk').checked ? Math.round(v / snapSize) * snapSize : Math.round(v);
+  const snapChk = document.getElementById('snap-chk');
+  return snapChk && snapChk.checked ? Math.round(v / snapSize) * snapSize : Math.round(v);
 }
 
 function primarySel() { return selSet.size === 1 ? [...selSet][0] : null; }

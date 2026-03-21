@@ -8,9 +8,11 @@ function doRestore() {
     selSet = new Set();
     pendingRestore = null;
     loadTextures();
+    loadSongsFromStorage();
     autoAssignAll();
     refresh();
     buildTexPanel();
+    buildSongPanel();
     setTimeout(fitView, 60);
     toast('Session restored');
   }
@@ -18,6 +20,7 @@ function doRestore() {
 
 buildPalette();
 buildProps();
+initDraggablePanels();
 
 try {
   const raw = localStorage.getItem('lb_save');
@@ -26,12 +29,26 @@ try {
     if (data && data.objects && data.objects.length > 0) {
       pendingRestore = data;
       document.getElementById('modal-restore').classList.add('open');
+      loadTextures();
+      loadSongsFromStorage();
+      buildTexPanel();
+      buildSongPanel();
       setTimeout(fitView, 60);
     } else {
-      loadTextures(); buildTexPanel();
+      loadTextures();
+      loadSongsFromStorage();
+      buildTexPanel();
+      buildSongPanel();
       setTimeout(fitView, 60);
     }
   } else {
     setTimeout(fitView, 60);
   }
 } catch (e) { setTimeout(fitView, 60); }
+
+document.addEventListener('unsaved-exit-setup', () => {
+  document.getElementById('unsaved-leave-btn').addEventListener('click', () => {
+    window.removeEventListener('beforeunload', () => {});
+    closeModal('modal-unsaved-exit');
+  });
+});

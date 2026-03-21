@@ -23,6 +23,15 @@ const OBJ_TYPES = [
 const CMAP = {};
 OBJ_TYPES.forEach(t => CMAP[t.id] = t.color);
 
+const BUILTIN_FONTS = [
+  'sans-serif','serif','monospace','cursive','fantasy',
+  'Arial','Verdana','Helvetica','Tahoma','Trebuchet MS',
+  'Georgia','Times New Roman','Courier New','Impact','Comic Sans MS',
+];
+
+const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+const MOD = isMac ? '⌘' : 'Ctrl';
+
 const FDEFS = {
   floor: [
     ['Name', 'name:text'],
@@ -102,7 +111,7 @@ const FDEFS = {
     ['Name', 'name:text'],
     ['Position', 'x:num,y:num'],
     ['Content', 'content:richtext'],
-    ['Style', 'color:text,font:text'],
+    ['Style', 'color:text,fontFamily:fontsel,fontSize:num,bold:bool'],
     ['Options', 'ghost:bool'],
   ],
   portal: [
@@ -126,7 +135,7 @@ const FDEFS = {
   music: [
     ['Name', 'name:text'],
     ['Position', 'x:num,y:num'],
-    ['Options', 'areaId:aref,song:text,fadeDuration:num,restartOnDie:bool'],
+    ['Options', 'areaId:aref,song:songsel,fadeDuration:num,restartOnDie:bool'],
   ],
   enemySpawner: [
     ['Name', 'name:text'],
@@ -146,21 +155,22 @@ const SHORTCUTS = [
   ['Select', 'V'],
   ['Place', 'P'],
   ['Pan', 'H'],
+  ['Test Play', 'T'],
   ['Multi-select', 'Shift+click'],
   ['Box select', 'Shift+drag'],
-  ['Undo', 'Ctrl+Z'],
-  ['Redo', 'Ctrl+Y'],
-  ['Duplicate', 'Ctrl+D'],
-  ['Copy', 'Ctrl+C'],
-  ['Paste', 'Ctrl+V'],
-  ['Group', 'Ctrl+G'],
+  ['Undo', MOD + '+Z'],
+  ['Redo', MOD + '+Y'],
+  ['Duplicate', MOD + '+D'],
+  ['Copy', MOD + '+C'],
+  ['Paste', MOD + '+V'],
+  ['Group', MOD + '+G'],
   ['Delete', 'Del'],
   ['Deselect', 'Escape'],
   ['Nudge 1px', 'Arrow'],
   ['Nudge 10px', 'Shift+Arrow'],
   ['Move up', ']'],
   ['Move down', '['],
-  ['Fit', 'Ctrl+0'],
+  ['Fit', MOD + '+0'],
   ['Focus selected', 'F'],
   ['Zoom', 'Scroll'],
   ['Pan', 'Space+drag'],
@@ -174,7 +184,8 @@ const EXPORT_ORDER = [
   'keyId', 'keyColor', 'keyhole', 'closeOnAreaId',
   'riseWithId', 'riseYOnly', 'riseYOffset',
   'flowUp', 'flowSpeed', 'flowDuration', 'flowAreaId', 'riseId',
-  'strength', 'min', 'max', 'detectionRadius', 'stuck', 'blue', 'color', 'font', 'content',
+  'strength', 'min', 'max', 'detectionRadius', 'stuck', 'blue', 'color',
+  'fontFamily', 'fontSize', 'bold', 'content',
   'portal-id', 'to-portal-id',
   'id', 'areaId', 'spawnerAreaId',
   'count', 'spread', 'speed',
@@ -185,12 +196,6 @@ const EXPORT_ORDER = [
 ];
 
 const TAG_COLORS = {
-  y: '#fce512',
-  r: '#fc1212',
-  g: '#4caf50',
-  bl: '#5b9cf6',
-  o: '#fc9312',
-  p: '#c084fc',
-  w: '#ffffff',
-  gray: '#9b9b9c',
+  y: '#fce512', r: '#fc1212', g: '#4caf50', bl: '#5b9cf6',
+  o: '#fc9312', p: '#c084fc', w: '#ffffff', gray: '#9b9b9c',
 };

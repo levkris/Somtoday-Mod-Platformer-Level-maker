@@ -7,19 +7,6 @@ let LS_QUOTA = 10 * 1024 * 1024;
       if (est.quota) LS_QUOTA = Math.min(est.quota, 50 * 1024 * 1024);
     }
   } catch (e) {}
-  try {
-    let lo = 0, hi = 50 * 1024 * 1024;
-    const probe = 'lb_quota_probe';
-    const chunk = 'x'.repeat(1024);
-    while (hi - lo > 1024) {
-      const mid = Math.floor((lo + hi) / 2);
-      try { localStorage.setItem(probe, chunk.repeat(mid / 1024)); lo = mid; }
-      catch (e) { hi = mid; }
-    }
-    localStorage.removeItem(probe);
-    const used = getStorageUsage();
-    LS_QUOTA = lo + used;
-  } catch (e) {}
   updateStorageBar();
 })();
 
@@ -39,6 +26,7 @@ function saveToStorage() {
     localStorage.setItem('lb_save', JSON.stringify(data));
   } catch (e) {}
   saveTextures();
+  saveSongs();
 }
 
 function saveTextures() {
@@ -49,6 +37,16 @@ function saveTextures() {
     try { localStorage.setItem('lb_tex_' + name, textures[name]); } catch (e) {}
   });
   try { localStorage.setItem('lb_tex_index', JSON.stringify(Object.keys(textures))); } catch (e) {}
+}
+
+function saveSongs() {
+  const existing = Object.keys(localStorage).filter(k => k.startsWith('lb_song_'));
+  const currentKeys = new Set(Object.keys(songs).map(n => 'lb_song_' + n));
+  existing.forEach(k => { if (!currentKeys.has(k)) localStorage.removeItem(k); });
+  Object.keys(songs).forEach(name => {
+    try { localStorage.setItem('lb_song_' + name, songs[name]); } catch (e) {}
+  });
+  try { localStorage.setItem('lb_song_index', JSON.stringify(Object.keys(songs))); } catch (e) {}
 }
 
 function loadTextures() {
@@ -63,18 +61,16 @@ function loadTextures() {
   } catch (e) {}
 }
 
-function loadFromStorage() {
+function loadSongsFromStorage() {
   try {
-    const raw = localStorage.getItem('lb_save');
-    if (!raw) return false;
-    const data = JSON.parse(raw);
-    if (data.level) level = data.level;
-    if (data.objects) objects = data.objects;
-    if (data.groups) groups = data.groups || {};
-    if (data.idCtr) idCtr = data.idCtr;
-    selSet = new Set();
-    return true;
-  } catch (e) { return false; }
+    const idx = localStorage.getItem('lb_song_index');
+    if (!idx) return;
+    const names = JSON.parse(idx);
+    names.forEach(name => {
+      const data = localStorage.getItem('lb_song_' + name);
+      if (data) songs[name] = data;
+    });
+  } catch (e) {}
 }
 
 function getStorageUsage() {
@@ -95,6 +91,7 @@ function getProjectSize() {
     const data = { level, objects: objects.map(o => { const c = Object.assign({}, o); delete c._resolvedTex; return c; }), groups, idCtr };
     s += JSON.stringify(data).length * 2;
     Object.keys(textures).forEach(n => { s += (n.length + textures[n].length) * 2; });
+    Object.keys(songs).forEach(n => { s += (n.length + songs[n].length) * 2; });
   } catch (e) {}
   return s;
 }
@@ -114,26 +111,46 @@ function updateStorageBar() {
   fill.style.background = pct > 90 ? 'var(--red)' : pct > 65 ? 'var(--yellow)' : 'var(--accent)';
 }
 
-// Texture helpers
-function texDrop(e) { e.preventDefault(); clsRm('tex-drop', 'over'); loadTexFiles([...e.dataTransfer.files]); }
-function texFilePicked(e) { loadTexFiles([...e.target.files]); e.target.value = ''; }
+function texDrop(e) { e.preventDefault(); clsRm('tex-drop', 'over'); loadAssetFiles([...e.dataTransfer.files]); }
+function texFilePicked(e) { loadAssetFiles([...e.target.files]); e.target.value = ''; }
 
-function loadTexFiles(files) {
+function loadAssetFiles(files) {
   const imgs = files.filter(f => f.type.startsWith('image/'));
-  if (!imgs.length) return;
-  let n = 0;
+  const audios = files.filter(f => f.type.startsWith('audio/') || /\.(mp3|ogg|wav|m4a|flac)$/i.test(f.name));
+  let pending = imgs.length + audios.length;
+  if (!pending) return;
+  let autoMatched = 0;
+
+  const done = () => {
+    pending--;
+    if (pending <= 0) {
+      const m = autoAssignAll();
+      autoMatched += m;
+      buildTexPanel();
+      buildSongPanel();
+      saveTextures();
+      saveSongs();
+      const total = imgs.length + audios.length;
+      toast('Loaded ' + total + ' file' + (total > 1 ? 's' : '') + (autoMatched ? ' - auto-matched ' + autoMatched : ''));
+      buildProps();
+    }
+  };
+
   imgs.forEach(f => {
     const reader = new FileReader();
     reader.onload = ev => {
       textures[f.name] = ev.target.result;
       delete texImgCache[f.name];
-      n++;
-      if (n === imgs.length) {
-        const m = autoAssignAll();
-        buildTexPanel();
-        saveTextures();
-        toast('Loaded ' + n + ' texture' + (n > 1 ? 's' : '') + (m ? ' - auto-matched ' + m : ''));
-      }
+      done();
+    };
+    reader.readAsDataURL(f);
+  });
+
+  audios.forEach(f => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      songs[f.name] = ev.target.result;
+      done();
     };
     reader.readAsDataURL(f);
   });
@@ -195,9 +212,17 @@ function deleteTex(name, e) {
   saveTextures();
 }
 
+function deleteSong(name, e) {
+  e.stopPropagation();
+  delete songs[name];
+  buildSongPanel();
+  saveSongs();
+}
+
 function buildTexPanel() {
   updateStorageBar();
   const grid = document.getElementById('tex-grid');
+  if (!grid) return;
   const names = Object.keys(textures);
   if (!names.length) { grid.innerHTML = '<div class="tex-none">No textures loaded</div>'; return; }
   grid.innerHTML = '';
@@ -205,13 +230,54 @@ function buildTexPanel() {
     const card = document.createElement('div');
     card.className = 'tex-card';
     card.title = name;
-    card.innerHTML = '<img src="' + textures[name] + '" alt="' + name + '"><div class="tex-card-name">' + name + '</div><div class="tex-card-del" onclick="deleteTex(\'' + name.replace(/'/g, "\\'") + '\',event)">x</div>';
+    const safeName = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    card.innerHTML = '<img src="' + textures[name] + '" alt="' + name + '"><div class="tex-card-name">' + name + '</div><div class="tex-card-del" onclick="deleteTex(\'' + safeName + '\',event)">×</div>';
     card.addEventListener('click', () => {
       const p = primarySel();
       if (p && 'texture' in p) { p.texture = name; p._resolvedTex = name; buildProps(); render(); }
     });
     grid.appendChild(card);
   });
+}
+
+function buildSongPanel() {
+  updateStorageBar();
+  const list = document.getElementById('song-list');
+  if (!list) return;
+  const names = Object.keys(songs);
+  if (!names.length) { list.innerHTML = '<div class="tex-none">No songs loaded</div>'; return; }
+  list.innerHTML = '';
+  names.forEach(name => {
+    const card = document.createElement('div');
+    card.className = 'song-card';
+    card.title = name;
+    const safeName = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    card.innerHTML = `
+      <div class="song-card-icon">♪</div>
+      <div class="song-card-name">${name}</div>
+      <button class="song-card-play" onclick="previewSong('${safeName}',event)" title="Preview">▶</button>
+      <div class="tex-card-del" onclick="deleteSong('${safeName}',event)" style="position:relative;width:14px;height:14px">×</div>
+    `;
+    card.addEventListener('click', e => {
+      if (e.target.closest('.song-card-play') || e.target.closest('.tex-card-del')) return;
+      const p = primarySel();
+      if (p && 'song' in p) { p.song = name; buildProps(); debouncedSave(); }
+      const songSel = document.getElementById('lvl-song-sel');
+      if (songSel) { level.song = name; songSel.value = name; debouncedSave(); }
+    });
+    list.appendChild(card);
+  });
+}
+
+let _previewAudio = null;
+function previewSong(name, e) {
+  e.stopPropagation();
+  if (_previewAudio) { _previewAudio.pause(); _previewAudio = null; }
+  if (!songs[name]) return;
+  _previewAudio = new Audio(songs[name]);
+  _previewAudio.volume = 0.4;
+  _previewAudio.play().catch(() => {});
+  setTimeout(() => { if (_previewAudio) { _previewAudio.pause(); _previewAudio = null; } }, 5000);
 }
 
 async function exportZip() {
@@ -230,6 +296,12 @@ async function exportZip() {
     const data = textures[name];
     const b64 = data.split(',')[1];
     if (b64) texFolder.file(name, b64, { base64: true });
+  });
+  const songFolder = folder.folder('sounds');
+  Object.keys(songs).forEach(name => {
+    const data = songs[name];
+    const b64 = data.split(',')[1];
+    if (b64) songFolder.file(name, b64, { base64: true });
   });
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
   const a = document.createElement('a');

@@ -12,6 +12,7 @@ function switchRight(id, btn) {
   btn.classList.add('active');
   document.getElementById('rtab-' + id).classList.add('active');
   if (id === 'textures') { buildTexPanel(); updateStorageBar(); }
+  if (id === 'songs') { buildSongPanel(); updateStorageBar(); }
 }
 
 function clsAdd(e, id, cls) { e.preventDefault(); document.getElementById(id).classList.add(cls); }
@@ -200,10 +201,7 @@ function buildHierarchy(filter) {
     const inAny = Object.keys(groups).some(g => groups[g].includes(draggedId));
     if (!inAny) return;
     pushUndo();
-    Object.keys(groups).forEach(g => {
-      groups[g] = groups[g].filter(id => id !== draggedId);
-      if (!groups[g].length) delete groups[g];
-    });
+    Object.keys(groups).forEach(g => { groups[g] = groups[g].filter(id => id !== draggedId); if (!groups[g].length) delete groups[g]; });
     refresh();
   }
 
@@ -216,27 +214,16 @@ function buildHierarchy(filter) {
     const grpEl = document.createElement('div'); grpEl.className = 'hier-group';
     const hdr = document.createElement('div'); hdr.className = 'hier-group-hdr';
     const anySel = members.some(o => selSet.has(o));
-    const selIcon = document.createElement('span'); selIcon.style.fontSize = '9px'; selIcon.textContent = anySel ? '\u25a0' : '\u25a1';
+    const selIcon = document.createElement('span'); selIcon.style.fontSize = '9px'; selIcon.textContent = anySel ? '■' : '□';
     const nameSpan = document.createElement('span'); nameSpan.style.flex = '1'; nameSpan.textContent = gid;
     const countSpan = document.createElement('span'); countSpan.style.cssText = 'font-size:8px;color:var(--dim)'; countSpan.textContent = members.length;
-    const renameBtn = document.createElement('span'); renameBtn.style.cssText = 'font-size:9px;cursor:pointer;padding:0 4px;opacity:0.6'; renameBtn.title = 'Rename'; renameBtn.textContent = '\u270e';
+    const renameBtn = document.createElement('span'); renameBtn.style.cssText = 'font-size:9px;cursor:pointer;padding:0 4px;opacity:0.6'; renameBtn.title = 'Rename'; renameBtn.textContent = '✎';
     renameBtn.addEventListener('click', e => { e.stopPropagation(); openRenameGroup(gid); });
     hdr.append(selIcon, nameSpan, countSpan, renameBtn);
     hdr.addEventListener('click', () => { selSet = new Set(members); buildProps(); buildHierarchy(filter); updateSelStatus(); render(); });
-
-    grpEl.addEventListener('dragover', e => {
-      const id = +(e.dataTransfer.getData('text/plain') || hierDragId || 0);
-      if (!id) return;
-      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-      grpEl.classList.add('drag-over');
-    });
+    grpEl.addEventListener('dragover', e => { const id = +(e.dataTransfer.getData('text/plain') || hierDragId || 0); if (!id) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; grpEl.classList.add('drag-over'); });
     grpEl.addEventListener('dragleave', e => { if (!grpEl.contains(e.relatedTarget)) grpEl.classList.remove('drag-over'); });
-    grpEl.addEventListener('drop', e => {
-      e.preventDefault(); e.stopPropagation();
-      grpEl.classList.remove('drag-over');
-      const id = +(e.dataTransfer.getData('text/plain') || hierDragId || 0);
-      dropIntoGroup(gid, id);
-    });
+    grpEl.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); grpEl.classList.remove('drag-over'); const id = +(e.dataTransfer.getData('text/plain') || hierDragId || 0); dropIntoGroup(gid, id); });
     grpEl.appendChild(hdr);
     vis.forEach(o => { processed.add(o._id); grpEl.appendChild(makeItem(o, true)); });
     list.appendChild(grpEl);
@@ -245,21 +232,9 @@ function buildHierarchy(filter) {
   const rootDrop = document.createElement('div');
   rootDrop.className = 'hier-root-drop';
   rootDrop.textContent = 'drop here to remove from group';
-  rootDrop.addEventListener('dragover', e => {
-    const id = +(e.dataTransfer.getData('text/plain') || hierDragId || 0);
-    if (!id) return;
-    const inAny = Object.keys(groups).some(g => groups[g].includes(id));
-    if (!inAny) return;
-    e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-    rootDrop.classList.add('drag-over');
-  });
+  rootDrop.addEventListener('dragover', e => { const id = +(e.dataTransfer.getData('text/plain') || hierDragId || 0); if (!id) return; const inAny = Object.keys(groups).some(g => groups[g].includes(id)); if (!inAny) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; rootDrop.classList.add('drag-over'); });
   rootDrop.addEventListener('dragleave', () => rootDrop.classList.remove('drag-over'));
-  rootDrop.addEventListener('drop', e => {
-    e.preventDefault();
-    rootDrop.classList.remove('drag-over');
-    const id = +(e.dataTransfer.getData('text/plain') || hierDragId || 0);
-    dropToRoot(id);
-  });
+  rootDrop.addEventListener('drop', e => { e.preventDefault(); rootDrop.classList.remove('drag-over'); const id = +(e.dataTransfer.getData('text/plain') || hierDragId || 0); dropToRoot(id); });
   list.appendChild(rootDrop);
 
   [...objects].reverse().forEach(o => {
@@ -288,5 +263,162 @@ function buildPalette() {
       btn.classList.add('active');
     });
     el.appendChild(btn);
+  });
+}
+
+function initDraggablePanels() {
+  document.querySelectorAll('.floating-panel').forEach(panel => {
+    const handle = panel.querySelector('.panel-drag-handle');
+    if (!handle) return;
+
+    const savedPos = localStorage.getItem('lb_panel_' + panel.id);
+    if (savedPos) {
+      const pos = JSON.parse(savedPos);
+      panel.style.left = pos.left;
+      panel.style.top = pos.top;
+      panel.style.width = pos.width || panel.style.width;
+      panel.style.height = pos.height || panel.style.height;
+    }
+
+    let startX, startY, startLeft, startTop;
+    handle.addEventListener('mousedown', e => {
+      e.preventDefault();
+      startX = e.clientX; startY = e.clientY;
+      const rect = panel.getBoundingClientRect();
+      startLeft = rect.left; startTop = rect.top;
+      panel.classList.add('dragging-panel');
+      document.addEventListener('mousemove', onDrag);
+      document.addEventListener('mouseup', onDragEnd);
+    });
+
+    function onDrag(e) {
+      const dx = e.clientX - startX, dy = e.clientY - startY;
+      let newLeft = startLeft + dx, newTop = startTop + dy;
+      newLeft = Math.max(0, Math.min(window.innerWidth - 40, newLeft));
+      newTop = Math.max(0, Math.min(window.innerHeight - 40, newTop));
+      panel.style.left = newLeft + 'px';
+      panel.style.top = newTop + 'px';
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+    }
+
+    function onDragEnd() {
+      panel.classList.remove('dragging-panel');
+      document.removeEventListener('mousemove', onDrag);
+      document.removeEventListener('mouseup', onDragEnd);
+      localStorage.setItem('lb_panel_' + panel.id, JSON.stringify({
+        left: panel.style.left, top: panel.style.top,
+        width: panel.style.width, height: panel.style.height
+      }));
+    }
+
+    const resizeHandle = panel.querySelector('.panel-resize-handle');
+    if (resizeHandle) {
+      let rStartX, rStartY, rStartW, rStartH;
+      resizeHandle.addEventListener('mousedown', e => {
+        e.preventDefault(); e.stopPropagation();
+        rStartX = e.clientX; rStartY = e.clientY;
+        rStartW = panel.offsetWidth; rStartH = panel.offsetHeight;
+        document.addEventListener('mousemove', onResize);
+        document.addEventListener('mouseup', onResizeEnd);
+      });
+      function onResize(e) {
+        const nw = Math.max(160, rStartW + e.clientX - rStartX);
+        const nh = Math.max(120, rStartH + e.clientY - rStartY);
+        panel.style.width = nw + 'px';
+        panel.style.height = nh + 'px';
+      }
+      function onResizeEnd() {
+        document.removeEventListener('mousemove', onResize);
+        document.removeEventListener('mouseup', onResizeEnd);
+        localStorage.setItem('lb_panel_' + panel.id, JSON.stringify({
+          left: panel.style.left, top: panel.style.top,
+          width: panel.style.width, height: panel.style.height
+        }));
+      }
+    }
+  });
+}
+
+function initDraggablePanels() {
+  document.querySelectorAll('.floating-panel').forEach(panel => {
+    const id = panel.id;
+    const saved = localStorage.getItem('lb_panel_' + id);
+    if (saved) {
+      try {
+        const { left, top, width, height } = JSON.parse(saved);
+        if (left !== undefined) panel.style.left = left;
+        if (top !== undefined) panel.style.top = top;
+        if (width !== undefined) panel.style.width = width;
+        if (height !== undefined) panel.style.height = height;
+      } catch(e) {}
+    }
+
+    const handle = panel.querySelector('.panel-drag-handle');
+    if (!handle) return;
+
+    let ox = 0, oy = 0, startL = 0, startT = 0;
+    let draggingPanel = false;
+
+    handle.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      draggingPanel = true;
+      const rect = panel.getBoundingClientRect();
+      ox = e.clientX - rect.left;
+      oy = e.clientY - rect.top;
+      startL = rect.left;
+      startT = rect.top;
+      panel.style.transition = 'none';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', e => {
+      if (!draggingPanel) return;
+      let nx = e.clientX - ox;
+      let ny = e.clientY - oy;
+      nx = Math.max(0, Math.min(nx, window.innerWidth - 60));
+      ny = Math.max(0, Math.min(ny, window.innerHeight - 40));
+      panel.style.left = nx + 'px';
+      panel.style.top = ny + 'px';
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!draggingPanel) return;
+      draggingPanel = false;
+      const rect = panel.getBoundingClientRect();
+      localStorage.setItem('lb_panel_' + id, JSON.stringify({
+        left: panel.style.left, top: panel.style.top,
+        width: panel.style.width, height: panel.style.height,
+      }));
+    });
+
+    const resizeHandle = panel.querySelector('.panel-resize-handle');
+    if (resizeHandle) {
+      let resizing = false, rox = 0, roy = 0, rw = 0, rh = 0;
+      resizeHandle.addEventListener('mousedown', e => {
+        resizing = true;
+        const rect = panel.getBoundingClientRect();
+        rox = e.clientX; roy = e.clientY;
+        rw = rect.width; rh = rect.height;
+        e.preventDefault(); e.stopPropagation();
+      });
+      document.addEventListener('mousemove', e => {
+        if (!resizing) return;
+        const nw = Math.max(180, rw + (e.clientX - rox));
+        const nh = Math.max(120, rh + (e.clientY - roy));
+        panel.style.width = nw + 'px';
+        panel.style.height = nh + 'px';
+      });
+      document.addEventListener('mouseup', () => {
+        if (!resizing) return;
+        resizing = false;
+        localStorage.setItem('lb_panel_' + id, JSON.stringify({
+          left: panel.style.left, top: panel.style.top,
+          width: panel.style.width, height: panel.style.height,
+        }));
+      });
+    }
   });
 }

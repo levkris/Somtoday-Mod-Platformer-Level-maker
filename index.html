@@ -16,20 +16,22 @@
     <button class="btn" id="tool-pan" onclick="setTool('pan')" title="H">Pan</button>
   </div>
   <div class="hdr-sep"></div>
-  <button class="btn" onclick="undo()" title="Ctrl+Z">Undo</button>
-  <button class="btn" onclick="redo()" title="Ctrl+Y">Redo</button>
+  <button class="btn" onclick="undo()" title="Ctrl/⌘+Z">Undo</button>
+  <button class="btn" onclick="redo()" title="Ctrl/⌘+Y">Redo</button>
   <div class="hdr-sep"></div>
-  <button class="btn" onclick="duplicateSelected()" title="Ctrl+D">Duplicate</button>
-  <button class="btn" onclick="groupSelected()" title="Ctrl+G">Group</button>
+  <button class="btn" onclick="duplicateSelected()" title="Ctrl/⌘+D">Duplicate</button>
+  <button class="btn" onclick="groupSelected()" title="Ctrl/⌘+G">Group</button>
   <button class="btn" onclick="ungroupSelected()">Ungroup</button>
   <button class="btn danger" onclick="deleteSelected()" title="Del">Delete</button>
   <div class="hdr-spacer"></div>
-  <button class="btn" onclick="fitView()" title="Ctrl+0">Fit</button>
+  <button class="btn" onclick="fitView()" title="Ctrl/⌘+0">Fit</button>
   <div class="zoom-grp">
-    <button class="btn sm" onclick="changeZoom(-0.15)">-</button>
+    <button class="btn sm" onclick="changeZoom(-0.15)">−</button>
     <span class="zoom-lbl" id="zoom-lbl">100%</span>
     <button class="btn sm" onclick="changeZoom(0.15)">+</button>
   </div>
+  <div class="hdr-sep"></div>
+  <button class="btn accent2" onclick="startTestPlay()" title="T">▶ Test</button>
   <div class="hdr-sep"></div>
   <button class="btn" onclick="openImport()">Import</button>
   <button class="btn accent" onclick="openExport()">Export XML</button>
@@ -38,7 +40,11 @@
 </div>
 
 <div class="workspace">
-  <div class="left-panel">
+  <div class="left-panel floating-panel" id="panel-left">
+    <div class="panel-drag-handle">
+      <span class="panel-drag-title">Objects / Hierarchy</span>
+      <div class="panel-resize-handle">⠿</div>
+    </div>
     <div class="panel-tabs">
       <button class="panel-tab active" onclick="switchLeft('objects',this)">Objects</button>
       <button class="panel-tab" onclick="switchLeft('hierarchy',this)">Hierarchy</button>
@@ -62,10 +68,15 @@
     </div>
   </div>
 
-  <div class="right-panel">
+  <div class="right-panel floating-panel" id="panel-right">
+    <div class="panel-drag-handle">
+      <span class="panel-drag-title">Properties / Assets</span>
+      <div class="panel-resize-handle">⠿</div>
+    </div>
     <div class="right-tabs">
       <button class="right-tab active" onclick="switchRight('props',this)">Properties</button>
       <button class="right-tab" onclick="switchRight('textures',this)">Textures</button>
+      <button class="right-tab" onclick="switchRight('songs',this)">Songs</button>
     </div>
     <div class="right-content active" id="rtab-props">
       <div class="props-hdr">
@@ -80,13 +91,32 @@
         <div class="storage-bar-track"><div class="storage-bar-fill" id="storage-bar-fill"></div></div>
       </div>
       <div class="tex-panel-body">
-        <div class="tex-drop" id="tex-drop" onclick="document.getElementById('tex-file').click()" ondragover="clsAdd(event,'tex-drop','over')" ondragleave="clsRm('tex-drop','over')" ondrop="texDrop(event)">
-          <input type="file" id="tex-file" multiple accept="image/*" onchange="texFilePicked(event)">
-          <div style="font-size:12px;color:var(--text);margin-bottom:3px">Upload Textures</div>
-          <div>Click or drag images here</div>
-          <div style="font-size:8px;margin-top:3px;color:var(--muted)">Auto-matched to objects by filename</div>
+        <div class="tex-drop" id="tex-drop"
+          onclick="document.getElementById('tex-file').click()"
+          ondragover="clsAdd(event,'tex-drop','over')"
+          ondragleave="clsRm('tex-drop','over')"
+          ondrop="texDrop(event)">
+          <input type="file" id="tex-file" multiple accept="image/*,audio/*,.mp3,.ogg,.wav,.m4a,.flac" onchange="texFilePicked(event)">
+          <div style="font-size:12px;color:var(--text);margin-bottom:3px">Upload Textures & Songs</div>
+          <div>Click or drag files here</div>
+          <div style="font-size:8px;margin-top:3px;color:var(--muted)">Images auto-matched · Songs selectable in props</div>
         </div>
         <div class="tex-grid" id="tex-grid"></div>
+      </div>
+    </div>
+    <div class="right-content" id="rtab-songs">
+      <div class="tex-panel-body">
+        <div class="tex-drop"
+          onclick="document.getElementById('song-file').click()"
+          ondragover="event.preventDefault();event.currentTarget.classList.add('over')"
+          ondragleave="event.currentTarget.classList.remove('over')"
+          ondrop="event.preventDefault();event.currentTarget.classList.remove('over');loadAssetFiles([...event.dataTransfer.files])">
+          <input type="file" id="song-file" multiple accept="audio/*,.mp3,.ogg,.wav,.m4a,.flac" onchange="loadAssetFiles([...this.files]);this.value=''">
+          <div style="font-size:12px;color:var(--text);margin-bottom:3px">Upload Songs</div>
+          <div>Click or drag audio files here</div>
+          <div style="font-size:8px;margin-top:3px;color:var(--muted)">MP3, OGG, WAV, M4A, FLAC</div>
+        </div>
+        <div id="song-grid" class="song-grid"></div>
       </div>
     </div>
   </div>
@@ -114,7 +144,7 @@
       <div style="font-size:12px;color:var(--text);margin-bottom:3px">Upload .xml or .zip file</div>
       <div>Click or drag your level file here</div>
     </div>
-    <div class="modal-div">- or paste XML below -</div>
+    <div class="modal-div">— or paste XML below —</div>
     <textarea id="import-xml" placeholder="Paste XML here..."></textarea>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal('modal-import')">Cancel</button>
@@ -168,18 +198,6 @@
   </div>
 </div>
 
-<div class="modal-bg" id="modal-unsaved-exit">
-  <div class="modal sm">
-    <h2>Unsaved changes</h2>
-    <p>Your project is too large to auto-save. Export a ZIP before leaving to avoid losing your work.</p>
-    <div class="modal-actions">
-      <button class="btn danger" id="unsaved-leave-btn">Leave anyway</button>
-      <button class="btn" onclick="closeModal('modal-unsaved-exit')">Cancel</button>
-      <button class="btn accent" onclick="exportZip();closeModal('modal-unsaved-exit')">Export ZIP</button>
-    </div>
-  </div>
-</div>
-
 <div class="ctx-menu" id="ctx-menu">
   <div class="ctx-item" onclick="ctxDupe()">Duplicate<span class="ctx-sc">Ctrl+D</span></div>
   <div class="ctx-item" onclick="ctxUp()">Move Up<span class="ctx-sc">]</span></div>
@@ -204,6 +222,7 @@
 <script src="ui.js"></script>
 <script src="props.js"></script>
 <script src="xml.js"></script>
+<script src="engine.js"></script>
 <script src="main.js"></script>
 </body>
 </html>

@@ -9,7 +9,8 @@ const HCUR = { se: 'se-resize', sw: 'sw-resize', ne: 'ne-resize', nw: 'nw-resize
 function setTool(t) {
   tool = t;
   document.querySelectorAll('.tool-seg .btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('tool-' + t).classList.add('active');
+  const btn = document.getElementById('tool-' + t);
+  if (btn) btn.classList.add('active');
   setCursor();
 }
 
@@ -227,12 +228,10 @@ canvas.addEventListener('mousemove', e => {
     const h = dragType.slice(2);
     let { ox, oy, ow, oh } = ds;
     let nx = ox, ny = oy, nw = ow, nh = oh;
-
     if (h.includes('e')) { nw = sn(ow + dgx); }
     if (h.includes('w')) { nx = sn(ox + dgx); nw = sn(ow - dgx); }
     if (h.includes('n')) { nh = sn(oh + dgy); }
     if (h.includes('s')) { ny = sn(oy + dgy); nh = sn(oh - dgy); }
-
     const moveX = h.includes('w');
     const moveY = h.includes('s');
     applyRect(p, nx, ny, nw, nh, moveX, moveY);
@@ -295,6 +294,7 @@ document.addEventListener('keydown', e => {
   if (C && e.key === 'v') { e.preventDefault(); ctxPaste(); return; }
   if (C && e.key === '0') { e.preventDefault(); fitView(); return; }
   if (C && e.key === 'g') { e.preventDefault(); groupSelected(); return; }
+  if (!C && e.key === 't') { e.preventDefault(); startTestPlay(); return; }
 
   if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
   if (e.key === 'Escape') {
