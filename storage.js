@@ -30,23 +30,31 @@ function saveToStorage() {
 }
 
 function saveTextures() {
+  const texKeys = Object.keys(textures);
+  if (texKeys.length === 0) return;
   const existing = Object.keys(localStorage).filter(k => k.startsWith('lb_tex_'));
-  const currentKeys = new Set(Object.keys(textures).map(n => 'lb_tex_' + n));
+  const currentKeys = new Set(texKeys.map(n => 'lb_tex_' + n));
   existing.forEach(k => { if (!currentKeys.has(k)) localStorage.removeItem(k); });
-  Object.keys(textures).forEach(name => {
-    try { localStorage.setItem('lb_tex_' + name, textures[name]); } catch (e) {}
+  texKeys.forEach(name => {
+    try { localStorage.setItem('lb_tex_' + name, textures[name]); } catch (e) {
+      console.warn('Could not save texture to localStorage (quota?):', name);
+    }
   });
-  try { localStorage.setItem('lb_tex_index', JSON.stringify(Object.keys(textures))); } catch (e) {}
+  try { localStorage.setItem('lb_tex_index', JSON.stringify(texKeys)); } catch (e) {}
 }
 
 function saveSongs() {
+  const songKeys = Object.keys(songs);
+  if (songKeys.length === 0) return;
   const existing = Object.keys(localStorage).filter(k => k.startsWith('lb_song_'));
-  const currentKeys = new Set(Object.keys(songs).map(n => 'lb_song_' + n));
+  const currentKeys = new Set(songKeys.map(n => 'lb_song_' + n));
   existing.forEach(k => { if (!currentKeys.has(k)) localStorage.removeItem(k); });
-  Object.keys(songs).forEach(name => {
-    try { localStorage.setItem('lb_song_' + name, songs[name]); } catch (e) {}
+  songKeys.forEach(name => {
+    try { localStorage.setItem('lb_song_' + name, songs[name]); } catch (e) {
+      console.warn('Could not save song to localStorage (quota?):', name);
+    }
   });
-  try { localStorage.setItem('lb_song_index', JSON.stringify(Object.keys(songs))); } catch (e) {}
+  try { localStorage.setItem('lb_song_index', JSON.stringify(songKeys)); } catch (e) {}
 }
 
 function loadTextures() {
@@ -208,15 +216,19 @@ function deleteTex(name, e) {
   e.stopPropagation();
   delete textures[name];
   delete texImgCache[name];
+  try { localStorage.removeItem('lb_tex_' + name); } catch(_) {}
+  try { localStorage.setItem('lb_tex_index', JSON.stringify(Object.keys(textures))); } catch(_) {}
   buildTexPanel();
-  saveTextures();
+  updateStorageBar();
 }
 
 function deleteSong(name, e) {
   e.stopPropagation();
   delete songs[name];
+  try { localStorage.removeItem('lb_song_' + name); } catch(_) {}
+  try { localStorage.setItem('lb_song_index', JSON.stringify(Object.keys(songs))); } catch(_) {}
   buildSongPanel();
-  saveSongs();
+  updateStorageBar();
 }
 
 function buildTexPanel() {
@@ -242,7 +254,7 @@ function buildTexPanel() {
 
 function buildSongPanel() {
   updateStorageBar();
-  const list = document.getElementById('song-list');
+  const list = document.getElementById('song-grid');
   if (!list) return;
   const names = Object.keys(songs);
   if (!names.length) { list.innerHTML = '<div class="tex-none">No songs loaded</div>'; return; }

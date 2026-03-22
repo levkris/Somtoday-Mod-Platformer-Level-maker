@@ -67,6 +67,7 @@ function deleteSelected() {
 
 function duplicateSelected() {
   if (!selSet.size) return;
+  if (!checkLimit(selSet.size)) return;
   pushUndo();
   const news = [];
   selSet.forEach(o => {
@@ -84,6 +85,7 @@ function duplicateSelected() {
 function ctxCopy() { clipboard = [...selSet].map(o => JSON.parse(JSON.stringify(o))); hideCtx(); }
 function ctxPaste() {
   if (!clipboard || !clipboard.length) return;
+  if (!checkLimit(clipboard.length)) return;
   pushUndo();
   const news = clipboard.map(o => {
     const c = JSON.parse(JSON.stringify(o)); c._id = mkId();
@@ -248,7 +250,9 @@ function refresh() {
   render();
   buildHierarchy(document.getElementById('hier-search').value || '');
   buildProps();
-  document.getElementById('sb-count').textContent = objects.length + ' objects';
+  const el = document.getElementById('sb-count');
+  el.textContent = objects.length + ' / ' + MAX_OBJECTS + ' objects';
+  el.style.color = objects.length >= MAX_OBJECTS ? 'var(--red)' : objects.length >= MAX_OBJECTS * 0.9 ? 'var(--yellow)' : '';
 }
 
 function buildPalette() {
@@ -267,158 +271,65 @@ function buildPalette() {
 }
 
 function initDraggablePanels() {
-  document.querySelectorAll('.floating-panel').forEach(panel => {
-    const handle = panel.querySelector('.panel-drag-handle');
-    if (!handle) return;
+  const leftPanel = document.getElementById('panel-left');
+  const rightPanel = document.getElementById('panel-right');
 
-    const savedPos = localStorage.getItem('lb_panel_' + panel.id);
-    if (savedPos) {
-      const pos = JSON.parse(savedPos);
-      panel.style.left = pos.left;
-      panel.style.top = pos.top;
-      panel.style.width = pos.width || panel.style.width;
-      panel.style.height = pos.height || panel.style.height;
-    }
+  function loadWidth(id, fallback) {
+    try {
+      const saved = localStorage.getItem('lb_panel_w_' + id);
+      if (saved) return Math.max(160, parseInt(saved));
+    } catch(e) {}
+    return fallback;
+  }
 
-    let startX, startY, startLeft, startTop;
-    handle.addEventListener('mousedown', e => {
-      e.preventDefault();
-      startX = e.clientX; startY = e.clientY;
-      const rect = panel.getBoundingClientRect();
-      startLeft = rect.left; startTop = rect.top;
-      panel.classList.add('dragging-panel');
-      document.addEventListener('mousemove', onDrag);
-      document.addEventListener('mouseup', onDragEnd);
-    });
+  function saveWidth(id, w) {
+    try { localStorage.setItem('lb_panel_w_' + id, w); } catch(e) {}
+  }
 
-    function onDrag(e) {
-      const dx = e.clientX - startX, dy = e.clientY - startY;
-      let newLeft = startLeft + dx, newTop = startTop + dy;
-      newLeft = Math.max(0, Math.min(window.innerWidth - 40, newLeft));
-      newTop = Math.max(0, Math.min(window.innerHeight - 40, newTop));
-      panel.style.left = newLeft + 'px';
-      panel.style.top = newTop + 'px';
-      panel.style.right = 'auto';
-      panel.style.bottom = 'auto';
-    }
+  leftPanel.style.width = loadWidth('left', 192) + 'px';
+  rightPanel.style.width = loadWidth('right', 252) + 'px';
 
-    function onDragEnd() {
-      panel.classList.remove('dragging-panel');
-      document.removeEventListener('mousemove', onDrag);
-      document.removeEventListener('mouseup', onDragEnd);
-      localStorage.setItem('lb_panel_' + panel.id, JSON.stringify({
-        left: panel.style.left, top: panel.style.top,
-        width: panel.style.width, height: panel.style.height
-      }));
-    }
+  function makeResizer(panel, side) {
+    const handle = document.createElement('div');
+    handle.className = 'panel-edge-resize panel-edge-resize-' + side;
+    panel.appendChild(handle);
 
-    const resizeHandle = panel.querySelector('.panel-resize-handle');
-    if (resizeHandle) {
-      let rStartX, rStartY, rStartW, rStartH;
-      resizeHandle.addEventListener('mousedown', e => {
-        e.preventDefault(); e.stopPropagation();
-        rStartX = e.clientX; rStartY = e.clientY;
-        rStartW = panel.offsetWidth; rStartH = panel.offsetHeight;
-        document.addEventListener('mousemove', onResize);
-        document.addEventListener('mouseup', onResizeEnd);
-      });
-      function onResize(e) {
-        const nw = Math.max(160, rStartW + e.clientX - rStartX);
-        const nh = Math.max(120, rStartH + e.clientY - rStartY);
-        panel.style.width = nw + 'px';
-        panel.style.height = nh + 'px';
-      }
-      function onResizeEnd() {
-        document.removeEventListener('mousemove', onResize);
-        document.removeEventListener('mouseup', onResizeEnd);
-        localStorage.setItem('lb_panel_' + panel.id, JSON.stringify({
-          left: panel.style.left, top: panel.style.top,
-          width: panel.style.width, height: panel.style.height
-        }));
-      }
-    }
-  });
-}
+    let resizing = false;
+    let startX = 0;
+    let startW = 0;
+    const id = side === 'right' ? 'left' : 'right';
 
-function initDraggablePanels() {
-  document.querySelectorAll('.floating-panel').forEach(panel => {
-    const id = panel.id;
-    const saved = localStorage.getItem('lb_panel_' + id);
-    if (saved) {
-      try {
-        const { left, top, width, height } = JSON.parse(saved);
-        if (left !== undefined) panel.style.left = left;
-        if (top !== undefined) panel.style.top = top;
-        if (width !== undefined) panel.style.width = width;
-        if (height !== undefined) panel.style.height = height;
-      } catch(e) {}
-    }
+    const onMove = e => {
+      if (!resizing) return;
+      const dx = e.clientX - startX;
+      const nw = Math.max(160, Math.min(600, side === 'right' ? startW + dx : startW - dx));
+      panel.style.width = nw + 'px';
+    };
 
-    const handle = panel.querySelector('.panel-drag-handle');
-    if (!handle) return;
-
-    let ox = 0, oy = 0, startL = 0, startT = 0;
-    let draggingPanel = false;
+    const onUp = () => {
+      if (!resizing) return;
+      resizing = false;
+      saveWidth(id, parseInt(panel.style.width));
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
 
     handle.addEventListener('mousedown', e => {
       if (e.button !== 0) return;
-      draggingPanel = true;
-      const rect = panel.getBoundingClientRect();
-      ox = e.clientX - rect.left;
-      oy = e.clientY - rect.top;
-      startL = rect.left;
-      startT = rect.top;
-      panel.style.transition = 'none';
+      resizing = true;
+      startX = e.clientX;
+      startW = panel.offsetWidth;
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
       e.preventDefault();
+      e.stopPropagation();
     });
+  }
 
-    document.addEventListener('mousemove', e => {
-      if (!draggingPanel) return;
-      let nx = e.clientX - ox;
-      let ny = e.clientY - oy;
-      nx = Math.max(0, Math.min(nx, window.innerWidth - 60));
-      ny = Math.max(0, Math.min(ny, window.innerHeight - 40));
-      panel.style.left = nx + 'px';
-      panel.style.top = ny + 'px';
-      panel.style.right = 'auto';
-      panel.style.bottom = 'auto';
-    });
-
-    document.addEventListener('mouseup', () => {
-      if (!draggingPanel) return;
-      draggingPanel = false;
-      const rect = panel.getBoundingClientRect();
-      localStorage.setItem('lb_panel_' + id, JSON.stringify({
-        left: panel.style.left, top: panel.style.top,
-        width: panel.style.width, height: panel.style.height,
-      }));
-    });
-
-    const resizeHandle = panel.querySelector('.panel-resize-handle');
-    if (resizeHandle) {
-      let resizing = false, rox = 0, roy = 0, rw = 0, rh = 0;
-      resizeHandle.addEventListener('mousedown', e => {
-        resizing = true;
-        const rect = panel.getBoundingClientRect();
-        rox = e.clientX; roy = e.clientY;
-        rw = rect.width; rh = rect.height;
-        e.preventDefault(); e.stopPropagation();
-      });
-      document.addEventListener('mousemove', e => {
-        if (!resizing) return;
-        const nw = Math.max(180, rw + (e.clientX - rox));
-        const nh = Math.max(120, rh + (e.clientY - roy));
-        panel.style.width = nw + 'px';
-        panel.style.height = nh + 'px';
-      });
-      document.addEventListener('mouseup', () => {
-        if (!resizing) return;
-        resizing = false;
-        localStorage.setItem('lb_panel_' + id, JSON.stringify({
-          left: panel.style.left, top: panel.style.top,
-          width: panel.style.width, height: panel.style.height,
-        }));
-      });
-    }
-  });
+  makeResizer(leftPanel, 'right');
+  makeResizer(rightPanel, 'left');
 }

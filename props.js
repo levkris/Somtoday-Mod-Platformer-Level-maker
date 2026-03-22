@@ -109,6 +109,16 @@ function attachPropListeners(p) {
       render(); debouncedSave();
     });
   }
+
+  body.querySelectorAll('.pick-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const key = btn.dataset.pickkey;
+      const targetType = btn.dataset.picktype;
+      if (!key || !targetType) return;
+      startPick(key, targetType, btn);
+    });
+  });
 }
 
 function mkField(key, type, o) {

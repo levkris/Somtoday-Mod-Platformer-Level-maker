@@ -3,6 +3,7 @@ let _testCanvas = null;
 let _testCtx = null;
 let _testAlive = false;
 let _testAnimId = null;
+let _testStopMusic = null;
 
 function startTestPlay() {
   if (_testActive) { stopTestPlay(); return; }
@@ -41,6 +42,7 @@ function startTestPlay() {
 }
 
 function stopTestPlay() {
+  if (_testStopMusic) { _testStopMusic(); _testStopMusic = null; }
   _testAlive = false;
   _testActive = false;
   if (_testAnimId) cancelAnimationFrame(_testAnimId);
@@ -62,18 +64,47 @@ function runEngine(canvas, ctx, overlay) {
   const DEATH_DUR = 0.7;
   const DOOR_SLIDE_SPEED = 4;
   const FLAG_W = 14, FLAG_H = 80;
+  const PORTAL_COOLDOWN = 0.4;
 
   const textureCache = {};
 
+  function resolveTexKey(texPath) {
+    if (!texPath) return null;
+    if (textures[texPath]) return texPath;
+    const norm = s => s.toLowerCase().replace(/\\/g, '/');
+    const p = norm(texPath);
+    let best = null, bestScore = 0;
+    Object.keys(textures).forEach(name => {
+      const n = norm(name);
+      const ne = n.replace(/\.[^.]+$/, '');
+      let score = 0;
+      if (p === n || p.endsWith('/' + n)) score = 100;
+      else if (p.endsWith(ne) || p.endsWith('/' + ne)) score = 90;
+      else {
+        const pp = p.split('/'), np = ne.split('/');
+        for (let i = 1; i <= Math.min(pp.length, np.length); i++) {
+          if (pp[pp.length - i] === np[np.length - i]) score += 10;
+          else break;
+        }
+        if (p.includes(ne.split('/').pop())) score += 5;
+      }
+      if (score > bestScore) { bestScore = score; best = name; }
+    });
+    return bestScore >= 5 ? best : null;
+  }
+
   function loadTexture(key) {
-    if (textureCache[key]) return textureCache[key];
-    const dataUrl = textures[key];
+    if (!key) return null;
+    const resolved = resolveTexKey(key);
+    if (!resolved) return null;
+    if (textureCache[resolved]) return textureCache[resolved];
+    const dataUrl = textures[resolved];
     if (!dataUrl) return null;
     const img = new Image();
     img.src = dataUrl;
     const entry = { img, pat: null };
     img.onload = () => { entry.pat = ctx.createPattern(img, 'repeat'); };
-    textureCache[key] = entry;
+    textureCache[resolved] = entry;
     return entry;
   }
 
@@ -96,7 +127,7 @@ function runEngine(canvas, ctx, overlay) {
       bgColor2: lvlData.bgColor2 || null,
       bgTexture: lvlData.bgTexture || null,
       bgTextureMode: lvlData.bgTextureMode || 'tile',
-      bgTextureAlpha: lvlData.bgTextureAlpha ?? 1,
+      bgTextureAlpha: lvlData.bgTextureAlpha != null ? lvlData.bgTextureAlpha : 1,
       _bgBaked: null, _bgBakedW: 0, _bgBakedH: 0,
     };
 
@@ -158,6 +189,7 @@ function runEngine(canvas, ctx, overlay) {
         l.coins.push(obj); l.drawOrder.push(obj);
       } else if (o.type === 'checkpoint') {
         l.checkpoints.push({ type: 'checkpoint', x, y, activated: false });
+        l.drawOrder.push(l.checkpoints[l.checkpoints.length - 1]);
       } else if (o.type === 'end') {
         l.ends.push({ type: 'end', x, y, w, h });
       } else if (o.type === 'text') {
@@ -217,11 +249,12 @@ function runEngine(canvas, ctx, overlay) {
 
     for (const obj of [...l.floors, ...l.walls, ...l.lavas, ...l.trampolines, ...l.enemies, ...l.orbs, ...l.mpUp, ...l.mpRight, ...l.coins, ...l.portals]) {
       if (obj.texture) {
-        const resolvedKey = obj._resolvedTex || obj.texture;
-        const bestKey = textures[resolvedKey] ? resolvedKey :
-          Object.keys(textures).find(k => k === resolvedKey || k.endsWith('/' + resolvedKey) || k.split('/').pop() === resolvedKey.split('/').pop());
-        if (bestKey) obj.tex = loadTexture(bestKey);
+        obj.tex = loadTexture(obj.texture);
       }
+    }
+
+    if (l.bgTexture) {
+      l._bgTexEntry = loadTexture(l.bgTexture);
     }
 
     return l;
@@ -234,6 +267,7 @@ function runEngine(canvas, ctx, overlay) {
     canvas.height = canvas.parentElement.clientHeight;
     canvas.style.width = canvas.width + 'px';
     canvas.style.height = canvas.height + 'px';
+    parsedLvl._bgBaked = null;
   }
 
   resizeCanvas();
@@ -279,10 +313,108 @@ function runEngine(canvas, ctx, overlay) {
 
   function cleanup() {
     _testAlive = false;
+    _testStopMusic = null;
     document.removeEventListener('keydown', onKeyDown);
     document.removeEventListener('keyup', onKeyUp);
     window.removeEventListener('resize', resizeCanvas);
+    stopMusic();
   }
+
+  let musicAudio = null;
+  let musicFading = null;
+  let currentSong = null;
+
+  function _killAudio(a) {
+    if (!a) return;
+    try { a.pause(); a.src = ''; } catch(e) {}
+  }
+
+  function _killFading() {
+    if (!musicFading) return;
+    _killAudio(musicFading.outAudio);
+    _killAudio(musicFading.inAudio);
+    musicFading = null;
+  }
+
+  function stopMusic() {
+    currentSong = null;
+    _killFading();
+    _killAudio(musicAudio);
+    musicAudio = null;
+  }
+
+  _testStopMusic = stopMusic;
+
+  function getSongDataUrl(name) {
+    if (!name) return null;
+    if (songs[name]) return songs[name];
+    const norm = s => s.toLowerCase().replace(/\\/g, '/');
+    const n = norm(name);
+    const ne = n.replace(/\.[^.]+$/, '');
+    let best = null, bestScore = 0;
+    Object.keys(songs).forEach(key => {
+      const k = norm(key);
+      const ke = k.replace(/\.[^.]+$/, '');
+      let score = 0;
+      if (n === k || n.endsWith('/' + k)) score = 100;
+      else if (ne === ke || n.endsWith('/' + ke) || ne.endsWith('/' + ke)) score = 90;
+      else if (k.includes(ne.split('/').pop()) || ne.includes(ke.split('/').pop())) score = 50;
+      if (score > bestScore) { bestScore = score; best = key; }
+    });
+    return bestScore > 0 ? songs[best] : null;
+  }
+
+  function playMusic(name) {
+    currentSong = name;
+    _killFading();
+    _killAudio(musicAudio);
+    musicAudio = null;
+    if (!name) return;
+    const dataUrl = getSongDataUrl(name);
+    if (!dataUrl) return;
+    try {
+      musicAudio = new Audio(dataUrl);
+      musicAudio.loop = true;
+      musicAudio.volume = 0.7;
+      musicAudio.play().catch(() => {});
+    } catch(e) {}
+  }
+
+  function fadeMusicTo(name, duration) {
+    duration = Math.max(0.05, duration || 1.5);
+    currentSong = name;
+    const outAudio = musicFading ? musicFading.inAudio : musicAudio;
+    if (musicFading) { _killAudio(musicFading.outAudio); musicFading = null; }
+    musicAudio = null;
+    let inAudio = null;
+    if (name) {
+      const dataUrl = getSongDataUrl(name);
+      if (dataUrl) {
+        try {
+          inAudio = new Audio(dataUrl);
+          inAudio.loop = true;
+          inAudio.volume = 0;
+          inAudio.play().catch(() => {});
+        } catch(e) {}
+      }
+    }
+    musicFading = { outAudio, inAudio, timer: 0, duration };
+  }
+
+  function updateMusicFade(dt) {
+    if (!musicFading) return;
+    musicFading.timer += dt;
+    const t = Math.min(1, musicFading.timer / musicFading.duration);
+    if (musicFading.outAudio) musicFading.outAudio.volume = 0.7 * (1 - t);
+    if (musicFading.inAudio) musicFading.inAudio.volume = 0.7 * t;
+    if (t >= 1) {
+      _killAudio(musicFading.outAudio);
+      musicAudio = musicFading.inAudio;
+      musicFading = null;
+    }
+  }
+
+  if (parsedLvl.song) playMusic(parsedLvl.song);
 
   const COL = { floor: '#9b9b9c', wall: '#9b9b9c', lava: '#fc9312', tramp: '#1264fc', enemy: '#fc1212', coin: '#ffd700', coinShine: '#fff8a0', coinShadow: '#b8860b', orbCore: '#fce512', orbRing: '#eaecd1' };
 
@@ -308,6 +440,38 @@ function runEngine(canvas, ctx, overlay) {
     if (!wl.closeOnAreaId) return { x: wl.x, y: wl.y, w: wl.w, h: wl.h };
     const vis = 1 - wl.areaCloseSlide;
     return { x: wl.x, y: wl.y, w: wl.w, h: wl.h * vis };
+  }
+
+  function getCurrentCheckpoint() {
+    return checkpointHistory.length > 0 ? checkpointHistory[checkpointHistory.length - 1] : null;
+  }
+
+  function captureCollectedSnapshot() {
+    const snap = new Set();
+    parsedLvl.coins.forEach((co, i) => { if (co.collected) snap.add(i); });
+    return snap;
+  }
+
+  function captureKeySnapshot() {
+    const collectedKeys = new Set();
+    parsedLvl.keys.forEach((k, i) => { if (k.collected) collectedKeys.add(i); });
+    return { collectedKeys, heldKey: heldKey ? { ...heldKey } : null };
+  }
+
+  function captureDoorSnapshot() {
+    const snap = {};
+    parsedLvl.walls.forEach((w, i) => {
+      if (w.keyId) snap[i] = { doorOpen: w.doorOpen, doorSlide: w.doorSlide };
+    });
+    return snap;
+  }
+
+  function captureAreaSnapshot() {
+    return parsedLvl.areas.map(a => ({ triggered: a.triggered }));
+  }
+
+  function captureLavaSnapshot() {
+    return parsedLvl.lavas.map(lv => ({ currentH: lv.currentH, flowTimer: lv.flowTimer, flowing: lv.flowing }));
   }
 
   function updateCam() {
@@ -345,15 +509,64 @@ function runEngine(canvas, ctx, overlay) {
       px = parsedLvl.spawnX; py = parsedLvl.spawnY;
       elapsed = 0; sessionCoins = 0;
       parsedLvl.coins.forEach(co => { co.collected = false; });
-      parsedLvl.keys.forEach(k => { k.collected = false; k.x = k.origX; k.y = k.origY; });
+      parsedLvl.keys.forEach(k => { k.collected = false; k.x = k.origX; k.y = k.origY; k._swapLocked = false; });
       heldKey = null;
-      parsedLvl.walls.forEach(w => { if (w.keyId) { w.doorOpen = false; w.doorSlide = 0; w.doorDir = 0; } });
+      parsedLvl.walls.forEach(w => {
+        if (w.keyId) { w.doorOpen = false; w.doorSlide = 0; w.doorDir = 0; }
+        if (w.closeOnAreaId) { w.areaCloseSlide = 1; w.areaCloseDir = 0; }
+      });
       parsedLvl.areas.forEach(a => { a.triggered = false; });
       parsedLvl.musicTriggers.forEach(mt => { mt.fired = false; });
+      parsedLvl.lavas.forEach(lv => {
+        if (lv.flowUp) { lv.currentH = lv.h; lv.flowTimer = 0; lv.flowing = !lv.flowAreaId; }
+      });
       parsedLvl.enemies.forEach(en => { en.x = en.startX; en.y = en.startY; en.vy = 0; en.onGround = false; en.detected = false; });
+      parsedLvl.checkpoints.forEach(cp2 => { cp2.activated = false; });
     } else {
       px = cp.x; py = cp.y;
       sessionCoins = cp.coins || 0;
+      if (cp.collectedSnapshot) {
+        parsedLvl.coins.forEach((co, i) => { co.collected = cp.collectedSnapshot.has(i); });
+      }
+      if (cp.keySnapshot) {
+        parsedLvl.keys.forEach((k, i) => {
+          k.collected = cp.keySnapshot.collectedKeys.has(i);
+          if (!k.collected) { k.x = k.origX; k.y = k.origY; }
+          k._swapLocked = false;
+        });
+        heldKey = cp.keySnapshot.heldKey ? { ...cp.keySnapshot.heldKey } : null;
+      }
+      if (cp.doorSnapshot) {
+        parsedLvl.walls.forEach((w, i) => {
+          if (w.keyId && cp.doorSnapshot[i] !== undefined) {
+            w.doorOpen = cp.doorSnapshot[i].doorOpen;
+            w.doorSlide = cp.doorSnapshot[i].doorSlide;
+            w.doorDir = 0;
+          }
+        });
+      }
+      parsedLvl.areas.forEach((a, ai) => {
+        a.triggered = cp.areaSnapshot ? (cp.areaSnapshot[ai]?.triggered || false) : false;
+      });
+      parsedLvl.walls.forEach(w => {
+        if (!w.closeOnAreaId) return;
+        const linkedArea = parsedLvl.areas.find(a => a.areaId === w.closeOnAreaId);
+        const areaIdx = parsedLvl.areas.indexOf(linkedArea);
+        const wasTriggered = cp.areaSnapshot && areaIdx !== -1 && cp.areaSnapshot[areaIdx]?.triggered;
+        w.areaCloseSlide = wasTriggered ? 0 : 1;
+        w.areaCloseDir = 0;
+      });
+      if (cp.lavaSnapshot) {
+        parsedLvl.lavas.forEach((lv, i) => {
+          const snap = cp.lavaSnapshot[i];
+          if (!snap || !lv.flowUp) return;
+          lv.currentH = snap.currentH;
+          lv.flowTimer = snap.flowTimer;
+          lv.flowing = snap.flowing;
+        });
+      }
+      parsedLvl.musicTriggers.forEach(mt => { mt.fired = false; });
+      parsedLvl.enemies.forEach(en => { en.x = en.startX; en.y = en.startY; en.vy = 0; en.onGround = false; en.detected = false; });
     }
   }
 
@@ -363,10 +576,11 @@ function runEngine(canvas, ctx, overlay) {
       for (const s of deathSlices) { s.worldX += s.vx * dt; s.worldYBottom += s.vy * dt; s.vy -= GRAV * dt; if (s.vy < MAX_FALL) s.vy = MAX_FALL; s.rot += s.rotV * dt; }
       if (deathTimer <= 0) {
         deathSlices = [];
-        const cp = checkpointHistory.length > 0 ? checkpointHistory[checkpointHistory.length - 1] : null;
+        const cp = getCurrentCheckpoint();
         restoreFromCheckpoint(cp);
         vx = 0; vy = 0; onGround = false; portalCooldownTimer = 0; snapCam = true;
         parsedLvl.enemies.forEach(en => { if (!en._spawned) { en.x = en.startX; en.y = en.startY; en.vy = 0; en.onGround = false; } en.detected = false; });
+        for (const orb of parsedLvl.orbs) orb.actTimer = 0;
         phase = 'playing';
       }
       updateCam(); return;
@@ -376,6 +590,8 @@ function runEngine(canvas, ctx, overlay) {
     elapsed += dt;
     if (portalCooldownTimer > 0) portalCooldownTimer -= dt;
     if (doorMsg && doorMsg.timer > 0) doorMsg.timer -= dt;
+
+    updateMusicFade(dt);
 
     for (const popup of coinPopups) { popup.y -= 60 * dt; popup.life -= dt; }
     coinPopups = coinPopups.filter(p => p.life > 0);
@@ -401,9 +617,27 @@ function runEngine(canvas, ctx, overlay) {
       const fullyInside = px >= area.x && px + PW <= area.x + area.w && py >= area.y && py + PH <= area.y + area.h;
       if (!fullyInside) continue;
       area.triggered = true;
-      if (area.checkpointX !== null) checkpointHistory.push({ x: area.checkpointX, y: area.checkpointY ?? area.checkpointX, coins: sessionCoins });
+      if (area.checkpointX !== null) {
+        checkpointHistory.push({
+          x: area.checkpointX,
+          y: area.checkpointY != null ? area.checkpointY : area.checkpointX,
+          coins: sessionCoins,
+          elapsed,
+          collectedSnapshot: captureCollectedSnapshot(),
+          keySnapshot: captureKeySnapshot(),
+          doorSnapshot: captureDoorSnapshot(),
+          areaSnapshot: captureAreaSnapshot(),
+          lavaSnapshot: captureLavaSnapshot(),
+        });
+      }
       for (const wl of parsedLvl.walls) { if (wl.closeOnAreaId === area.areaId) wl.areaCloseDir = 1; }
       for (const lv of parsedLvl.lavas) { if (lv.flowAreaId === area.areaId) { lv.flowing = true; lv.flowTimer = 0; } }
+      for (const mt of parsedLvl.musicTriggers) {
+        if (!mt.fired && mt.areaId === area.areaId) {
+          mt.fired = true;
+          fadeMusicTo(mt.song, mt.fadeDuration);
+        }
+      }
     }
 
     const goLeft = KEY['ArrowLeft'] || KEY['KeyA'];
@@ -440,13 +674,40 @@ function runEngine(canvas, ctx, overlay) {
 
     for (const mp of parsedLvl.mpUp) {
       const oldCy = mp.cy;
-      if (!mp.triggerMode) {
+      if (mp.triggerMode) {
+        const playerOnTop = standingOn?._mp === mp;
+        const fallDir = mp.endY > mp.startY ? 1 : -1;
+        if (mp.triggerState === 'idle') {
+          if (playerOnTop) {
+            mp.triggerTimer += dt;
+            mp.cy = mp.startY - Math.min(mp.triggerTimer / mp.triggerTimeout, 1) * 14;
+          } else {
+            mp.triggerTimer = Math.max(0, mp.triggerTimer - dt * 2.5);
+            mp.cy = mp.startY - Math.min(mp.triggerTimer / mp.triggerTimeout, 1) * 14;
+          }
+          if (mp.triggerTimer >= mp.triggerTimeout) { mp.triggerState = 'falling'; mp.triggerTimer = 0; }
+        } else if (mp.triggerState === 'falling') {
+          mp.cy += fallDir * 200 * dt;
+          if ((fallDir === 1 && mp.cy >= mp.endY) || (fallDir === -1 && mp.cy <= mp.endY)) {
+            mp.cy = mp.endY; mp.triggerState = 'waiting'; mp.returnTimer = mp.returnTimeout;
+          }
+        } else if (mp.triggerState === 'waiting') {
+          mp.returnTimer -= dt;
+          if (mp.returnTimer <= 0) mp.triggerState = 'returning';
+        } else if (mp.triggerState === 'returning') {
+          mp.cy -= fallDir * 200 * dt;
+          if ((fallDir === 1 && mp.cy <= mp.startY) || (fallDir === -1 && mp.cy >= mp.startY)) {
+            mp.cy = mp.startY; mp.triggerState = 'idle'; mp.triggerTimer = 0;
+          }
+        }
+      } else {
         mp.cy += mp.dir * 200 * dt;
         if (mp.cy >= mp.endY) { mp.cy = mp.endY; mp.dir = -1; }
         if (mp.cy <= mp.startY) { mp.cy = mp.startY; mp.dir = 1; }
       }
       mp.deltaY = mp.cy - oldCy;
     }
+
     for (const mp of parsedLvl.mpRight) {
       const oldCx = mp.cx;
       mp.cx += mp.dir * 160 * dt;
@@ -467,10 +728,26 @@ function runEngine(canvas, ctx, overlay) {
           en.x += moveDir * spd;
           if (!en.onGround) { en.vy -= GRAV * dt; if (en.vy < MAX_FALL) en.vy = MAX_FALL; }
           en.y += en.vy * dt; en.onGround = false;
-          for (const fl of parsedLvl.floors.filter(f => !f.ghost)) {
+          const enSolids = [
+            ...parsedLvl.floors.filter(f => !f.ghost),
+            ...parsedLvl.mpUp.filter(mp => !mp.ghost).map(mp => ({ x: mp.x, y: mp.cy, w: mp.w, h: mp.h })),
+            ...parsedLvl.mpRight.filter(mp => !mp.ghost).map(mp => ({ x: mp.cx, y: mp.y, w: mp.w, h: mp.h })),
+            ...parsedLvl.walls.filter(w => !w.ghost && !w.keyId && !w.closeOnAreaId),
+          ];
+          for (const fl of enSolids) {
             if (!hit(en.x, en.y, en.w, en.h, fl.x, fl.y, fl.w, fl.h)) continue;
-            if (en.vy <= 0 && en.y < fl.y + fl.h) { en.y = fl.y + fl.h; en.vy = 0; en.onGround = true; }
+            const enBottom = en.y, enTop = en.y + en.h, flTop = fl.y + fl.h, flBottom = fl.y;
+            const overlapY = Math.min(enTop - flBottom, flTop - enBottom);
+            const overlapX = Math.min((en.x + en.w) - fl.x, (fl.x + fl.w) - en.x);
+            if (overlapY < overlapX) {
+              if (en.vy <= 0 && enBottom < flTop && enTop > flTop - 2) { en.y = flTop; en.vy = 0; en.onGround = true; }
+              else if (en.vy > 0) { en.y = flBottom - en.h; en.vy = -100; }
+            } else {
+              en.x -= moveDir * spd;
+              if (en.onGround) { en.vy = JUMP_V * 0.85; en.onGround = false; }
+            }
           }
+          if (en.onGround && py + PH < en.y - 20) { en.vy = JUMP_V * 0.85; en.onGround = false; }
         }
       } else if (!en.stuck) {
         if (!en.onGround) { en.vy -= GRAV * dt; if (en.vy < MAX_FALL) en.vy = MAX_FALL; }
@@ -487,7 +764,17 @@ function runEngine(canvas, ctx, overlay) {
     for (const cp of parsedLvl.checkpoints) {
       if (!cp.activated && hit(px, py, PW, PH, cp.x, cp.y, FLAG_W, FLAG_H)) {
         cp.activated = true;
-        checkpointHistory.push({ x: cp.x, y: cp.y, coins: sessionCoins });
+        checkpointHistory.push({
+          x: cp.x,
+          y: cp.y,
+          coins: sessionCoins,
+          elapsed,
+          collectedSnapshot: captureCollectedSnapshot(),
+          keySnapshot: captureKeySnapshot(),
+          doorSnapshot: captureDoorSnapshot(),
+          areaSnapshot: captureAreaSnapshot(),
+          lavaSnapshot: captureLavaSnapshot(),
+        });
       }
     }
 
@@ -507,6 +794,10 @@ function runEngine(canvas, ctx, overlay) {
       if (k.ghost || k.collected || k._swapLocked) continue;
       if (hit(px, py, PW, PH, k.x - k.r, k.y - k.r, k.r * 2, k.r * 2)) {
         k.collected = true;
+        if (heldKey) {
+          const droppedKey = parsedLvl.keys.find(kk => kk.keyId === heldKey.keyId);
+          if (droppedKey) { droppedKey.collected = false; droppedKey.x = px + PW / 2; droppedKey.y = py; droppedKey._swapLocked = true; }
+        }
         heldKey = { keyId: k.keyId, keyColor: k.keyColor };
       }
     }
@@ -517,7 +808,7 @@ function runEngine(canvas, ctx, overlay) {
         const dest = parsedLvl.portals.find(p => p.portalId === portal.toPortalId);
         if (!dest) continue;
         px = dest.x + (dest.w - PW) / 2; py = dest.y;
-        portalCooldownTimer = 0.4; snapCam = true; break;
+        portalCooldownTimer = PORTAL_COOLDOWN; snapCam = true; break;
       }
     }
 
@@ -634,42 +925,141 @@ function runEngine(canvas, ctx, overlay) {
   function texFill(obj, x, y, w, h, fallback) {
     const cx2 = wx(x), cy2 = wy(y, h);
     if (obj.tex && obj.tex.img && obj.tex.img.complete && obj.tex.img.naturalWidth > 0) {
-      if (obj.textureMode === 'stretch') {
-        ctx.drawImage(obj.tex.img, cx2, cy2, w, h);
+      const rot = (obj.rotation || 0) * Math.PI / 180;
+      ctx.save();
+      if (rot !== 0 || obj.invertX || obj.invertY) {
+        ctx.translate(cx2 + w / 2, cy2 + h / 2);
+        if (rot !== 0) ctx.rotate(rot);
+        ctx.scale(obj.invertX ? -1 : 1, obj.invertY ? -1 : 1);
+        ctx.translate(-w / 2, -h / 2);
+        const lx = 0, ly = 0;
+        drawTexContent(obj, lx, ly, w, h);
       } else {
-        ctx.save(); ctx.beginPath(); ctx.rect(cx2, cy2, w, h); ctx.clip();
-        if (obj.tex.pat) { const m = new DOMMatrix(); m.translateSelf(cx2, cy2); obj.tex.pat.setTransform(m); ctx.fillStyle = obj.tex.pat; ctx.fillRect(cx2, cy2, w, h); }
-        else { for (let ty = cy2; ty < cy2 + h; ty += obj.tex.img.naturalHeight) for (let tx = cx2; tx < cx2 + w; tx += obj.tex.img.naturalWidth) ctx.drawImage(obj.tex.img, tx, ty); }
-        ctx.restore();
+        drawTexContent(obj, cx2, cy2, w, h);
       }
-    } else { ctx.fillStyle = fallback; ctx.fillRect(cx2, cy2, w, h); }
+      ctx.restore();
+    } else {
+      ctx.fillStyle = fallback;
+      ctx.fillRect(cx2, cy2, w, h);
+    }
+  }
+
+  function drawTexContent(obj, lx, ly, w, h) {
+    if (obj.textureMode === 'stretch') {
+      ctx.drawImage(obj.tex.img, lx, ly, w, h);
+    } else if (obj.textureMode === 'cover') {
+      const imgW = obj.tex.img.naturalWidth, imgH = obj.tex.img.naturalHeight;
+      const scale = Math.max(w / imgW, h / imgH);
+      const dw = imgW * scale, dh = imgH * scale;
+      ctx.save(); ctx.beginPath(); ctx.rect(lx, ly, w, h); ctx.clip();
+      ctx.drawImage(obj.tex.img, lx + (w - dw) / 2, ly + (h - dh) / 2, dw, dh);
+      ctx.restore();
+    } else {
+      ctx.save(); ctx.beginPath(); ctx.rect(lx, ly, w, h); ctx.clip();
+      if (obj.tex.pat) {
+        const m = new DOMMatrix(); m.translateSelf(lx, ly);
+        obj.tex.pat.setTransform(m); ctx.fillStyle = obj.tex.pat; ctx.fillRect(lx, ly, w, h);
+      } else {
+        for (let ty = ly; ty < ly + h; ty += obj.tex.img.naturalHeight)
+          for (let tx = lx; tx < lx + w; tx += obj.tex.img.naturalWidth)
+            ctx.drawImage(obj.tex.img, tx, ty);
+      }
+      ctx.restore();
+    }
+  }
+
+  function drawCheckpoint(cp) {
+    const fx = wx(cp.x), fy = wy(cp.y, FLAG_H);
+    const poleCol = cp.activated ? '#4caf50' : '#888';
+    const flagCol = cp.activated ? '#2e7d32' : '#555';
+    ctx.save();
+    if (cp.activated) { ctx.shadowColor = 'rgba(76,175,80,0.5)'; ctx.shadowBlur = 14; }
+    ctx.fillStyle = poleCol;
+    ctx.fillRect(fx, fy, 4, FLAG_H);
+    ctx.fillStyle = flagCol;
+    ctx.beginPath();
+    ctx.moveTo(fx + 4, fy);
+    ctx.lineTo(fx + 30, fy + 13);
+    ctx.lineTo(fx + 4, fy + 26);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function bakeBg() {
+    const w = canvas.width, h = canvas.height;
+    if (parsedLvl._bgBaked && parsedLvl._bgBakedW === w && parsedLvl._bgBakedH === h) return parsedLvl._bgBaked;
+    const oc = new OffscreenCanvas(w, h);
+    const octx = oc.getContext('2d');
+    const top = parsedLvl.bgColor || '#0f0f23';
+    const bot = parsedLvl.bgColor2 || (parsedLvl.bgColor ? parsedLvl.bgColor : '#1a1a2e');
+    const g = octx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, top); g.addColorStop(1, bot);
+    octx.fillStyle = g; octx.fillRect(0, 0, w, h);
+    if (parsedLvl._bgTexEntry) {
+      const entry = parsedLvl._bgTexEntry;
+      if (entry.img.complete && entry.img.naturalWidth > 0) {
+        octx.globalAlpha = parsedLvl.bgTextureAlpha != null ? parsedLvl.bgTextureAlpha : 1;
+        if (parsedLvl.bgTextureMode === 'stretch') {
+          octx.drawImage(entry.img, 0, 0, w, h);
+        } else if (parsedLvl.bgTextureMode === 'cover') {
+          const iw = entry.img.naturalWidth, ih = entry.img.naturalHeight;
+          const scale = Math.max(w / iw, h / ih);
+          octx.drawImage(entry.img, (w - iw * scale) / 2, (h - ih * scale) / 2, iw * scale, ih * scale);
+        } else {
+          const pat = octx.createPattern(entry.img, 'repeat');
+          if (pat) { octx.fillStyle = pat; octx.fillRect(0, 0, w, h); }
+        }
+        octx.globalAlpha = 1;
+      }
+    }
+    parsedLvl._bgBaked = oc; parsedLvl._bgBakedW = w; parsedLvl._bgBakedH = h;
+    return oc;
   }
 
   function drawObj2(o) {
-    if (o.type === 'floor') { if (!o.tex) { ctx.fillStyle = COL.floor + '44'; ctx.fillRect(wx(o.x), wy(o.y, o.h), o.w, o.h); ctx.strokeStyle = COL.floor; ctx.lineWidth = 1; ctx.strokeRect(wx(o.x), wy(o.y, o.h), o.w, o.h); } else texFill(o, o.x, o.y, o.w, o.h, COL.floor); }
+    if (o.type === 'floor') {
+      if (!o.tex) { ctx.fillStyle = COL.floor + '44'; ctx.fillRect(wx(o.x), wy(o.y, o.h), o.w, o.h); ctx.strokeStyle = COL.floor; ctx.lineWidth = 1; ctx.strokeRect(wx(o.x), wy(o.y, o.h), o.w, o.h); }
+      else texFill(o, o.x, o.y, o.w, o.h, COL.floor);
+    }
     else if (o.type === 'wall') {
       const drawY = o.riseWithId ? o.riseCurrentY : o.y;
       const drawH = o.riseWithId ? o.riseCurrentH : o.h;
       if (o.keyId) {
         if (o.doorSlide >= 1) return;
         const dr = getDoorEffectiveRect(o); if (dr.h <= 0) return;
-        ctx.fillStyle = o.keyColor + '44'; ctx.fillRect(wx(dr.x), wy(dr.y, dr.h), dr.w, dr.h);
-        ctx.strokeStyle = o.keyColor; ctx.lineWidth = 2; ctx.strokeRect(wx(dr.x), wy(dr.y, dr.h), dr.w, dr.h);
+        if (o.tex) { texFill(o, dr.x, dr.y, dr.w, dr.h, COL.wall); }
+        else {
+          ctx.fillStyle = o.keyColor + '44'; ctx.fillRect(wx(dr.x), wy(dr.y, dr.h), dr.w, dr.h);
+          ctx.strokeStyle = o.keyColor; ctx.lineWidth = 2; ctx.strokeRect(wx(dr.x), wy(dr.y, dr.h), dr.w, dr.h);
+        }
       } else if (o.closeOnAreaId) {
         const dr = getAreaCloseRect(o); if (dr.h <= 0) return;
-        if (!o.tex) { ctx.fillStyle = COL.wall + '44'; ctx.fillRect(wx(dr.x), wy(dr.y, dr.h), dr.w, dr.h); ctx.strokeStyle = COL.wall; ctx.lineWidth = 1; ctx.strokeRect(wx(dr.x), wy(dr.y, dr.h), dr.w, dr.h); }
-        else texFill(o, dr.x, dr.y, dr.w, dr.h, COL.wall);
+        if (o.tex) texFill(o, dr.x, dr.y, dr.w, dr.h, COL.wall);
+        else { ctx.fillStyle = COL.wall + '44'; ctx.fillRect(wx(dr.x), wy(dr.y, dr.h), dr.w, dr.h); ctx.strokeStyle = COL.wall; ctx.lineWidth = 1; ctx.strokeRect(wx(dr.x), wy(dr.y, dr.h), dr.w, dr.h); }
       } else if (o.ghost) {
         ctx.save(); ctx.globalAlpha = 0.2; texFill(o, o.x, drawY, o.w, drawH, COL.wall); ctx.restore();
-      } else { texFill(o, o.x, drawY, o.w, drawH, COL.wall + '44'); }
+      } else {
+        if (o.tex) texFill(o, o.x, drawY, o.w, drawH, COL.wall);
+        else { ctx.fillStyle = COL.wall + '44'; ctx.fillRect(wx(o.x), wy(drawY, drawH), o.w, drawH); ctx.strokeStyle = COL.wall; ctx.lineWidth = 1; ctx.strokeRect(wx(o.x), wy(drawY, drawH), o.w, drawH); }
+      }
     }
     else if (o.type === 'lava') {
       const lh = o.flowUp ? o.currentH : o.h;
-      ctx.fillStyle = COL.lava + '88'; ctx.fillRect(wx(o.x), wy(o.y, lh), o.w, lh);
+      if (o.tex) texFill(o, o.x, o.y, o.w, lh, COL.lava);
+      else { ctx.fillStyle = COL.lava + '88'; ctx.fillRect(wx(o.x), wy(o.y, lh), o.w, lh); }
     }
-    else if (o.type === 'trampoline') { ctx.fillStyle = COL.tramp + '66'; ctx.fillRect(wx(o.x), wy(o.y, o.h), o.w, o.h); ctx.strokeStyle = COL.tramp; ctx.lineWidth = 2; ctx.strokeRect(wx(o.x), wy(o.y, o.h), o.w, o.h); }
-    else if (o.type === 'mpUp') { ctx.fillStyle = '#9b9b9c44'; ctx.fillRect(wx(o.x), wy(o.cy, o.h), o.w, o.h); ctx.strokeStyle = '#9b9b9c'; ctx.lineWidth = 1; ctx.strokeRect(wx(o.x), wy(o.cy, o.h), o.w, o.h); }
-    else if (o.type === 'mpRight') { ctx.fillStyle = '#9b9b9c44'; ctx.fillRect(wx(o.cx), wy(o.y, o.h), o.w, o.h); ctx.strokeStyle = '#9b9b9c'; ctx.lineWidth = 1; ctx.strokeRect(wx(o.cx), wy(o.y, o.h), o.w, o.h); }
+    else if (o.type === 'trampoline') {
+      if (o.tex) texFill(o, o.x, o.y, o.w, o.h, COL.tramp);
+      else { ctx.fillStyle = COL.tramp + '66'; ctx.fillRect(wx(o.x), wy(o.y, o.h), o.w, o.h); ctx.strokeStyle = COL.tramp; ctx.lineWidth = 2; ctx.strokeRect(wx(o.x), wy(o.y, o.h), o.w, o.h); }
+    }
+    else if (o.type === 'mpUp') {
+      if (o.tex) texFill(o, o.x, o.cy, o.w, o.h, COL.floor);
+      else { ctx.fillStyle = '#9b9b9c44'; ctx.fillRect(wx(o.x), wy(o.cy, o.h), o.w, o.h); ctx.strokeStyle = '#9b9b9c'; ctx.lineWidth = 1; ctx.strokeRect(wx(o.x), wy(o.cy, o.h), o.w, o.h); }
+    }
+    else if (o.type === 'mpRight') {
+      if (o.tex) texFill(o, o.cx, o.y, o.w, o.h, COL.floor);
+      else { ctx.fillStyle = '#9b9b9c44'; ctx.fillRect(wx(o.cx), wy(o.y, o.h), o.w, o.h); ctx.strokeStyle = '#9b9b9c'; ctx.lineWidth = 1; ctx.strokeRect(wx(o.cx), wy(o.y, o.h), o.w, o.h); }
+    }
     else if (o.type === 'enemy') {
       ctx.fillStyle = '#fc121240'; ctx.beginPath(); ctx.roundRect(wx(o.x), wy(o.y, o.h), o.w, o.h, 4); ctx.fill();
       ctx.strokeStyle = '#fc1212'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(wx(o.x), wy(o.y, o.h), o.w, o.h, 4); ctx.stroke();
@@ -693,14 +1083,18 @@ function runEngine(canvas, ctx, overlay) {
     }
     else if (o.type === 'key') {
       if (o.collected) return;
-      const cx2 = wx(o.x), cy2 = wy(o.y, o.r * 2) + o.r + Math.sin(o.bobTimer) * 3;
-      ctx.fillStyle = o.keyColor; ctx.beginPath(); ctx.arc(cx2, cy2, o.r * 0.58, 0, Math.PI * 2); ctx.fill();
-      ctx.fillRect(cx2, cy2 - 3, o.r * 1.1, 6);
+      const bob = Math.sin(o.bobTimer) * 3;
+      const kc = o.keyColor || '#ffd700';
+      const cx2 = wx(o.x), cy2 = wy(o.y, o.r * 2) + o.r + bob;
+      ctx.save();
+      ctx.shadowColor = kc; ctx.shadowBlur = 10;
+      ctx.fillStyle = kc;
+      ctx.beginPath(); ctx.arc(cx2 - o.r * 0.18, cy2, o.r * 0.58, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(cx2 - o.r * 0.18 + o.r * 0.58 * 0.85, cy2 - o.r * 0.14, o.r * 1.1, o.r * 0.28);
+      ctx.restore();
     }
     else if (o.type === 'checkpoint') {
-      const col2 = o.activated ? '#4caf50' : '#888';
-      ctx.fillStyle = col2; ctx.fillRect(wx(o.x), wy(o.y, FLAG_H), 4, FLAG_H);
-      ctx.beginPath(); ctx.moveTo(wx(o.x) + 4, wy(o.y, FLAG_H)); ctx.lineTo(wx(o.x) + 30, wy(o.y, FLAG_H) + 13); ctx.lineTo(wx(o.x) + 4, wy(o.y, FLAG_H) + 26); ctx.closePath(); ctx.fill();
+      drawCheckpoint(o);
     }
     else if (o.type === 'portal') {
       const t2 = performance.now() / 1000;
@@ -738,33 +1132,6 @@ function runEngine(canvas, ctx, overlay) {
     }
   }
 
-  function bakeBg() {
-    const w = canvas.width, h = canvas.height;
-    if (parsedLvl._bgBaked && parsedLvl._bgBakedW === w && parsedLvl._bgBakedH === h) return parsedLvl._bgBaked;
-    const oc = new OffscreenCanvas(w, h);
-    const octx = oc.getContext('2d');
-    const top = parsedLvl.bgColor || '#0f0f23';
-    const bot = parsedLvl.bgColor2 || (parsedLvl.bgColor ? parsedLvl.bgColor : '#1a1a2e');
-    const g = octx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, top); g.addColorStop(1, bot);
-    octx.fillStyle = g; octx.fillRect(0, 0, w, h);
-    if (parsedLvl.bgTexture) {
-      const entry = loadTexture(parsedLvl.bgTexture);
-      if (entry && entry.img.complete && entry.img.naturalWidth > 0) {
-        octx.globalAlpha = parsedLvl.bgTextureAlpha ?? 1;
-        if (parsedLvl.bgTextureMode === 'stretch') {
-          octx.drawImage(entry.img, 0, 0, w, h);
-        } else {
-          const pat = octx.createPattern(entry.img, 'repeat');
-          if (pat) { octx.fillStyle = pat; octx.fillRect(0, 0, w, h); }
-        }
-        octx.globalAlpha = 1;
-      }
-    }
-    parsedLvl._bgBaked = oc; parsedLvl._bgBakedW = w; parsedLvl._bgBakedH = h;
-    return oc;
-  }
-
   function render2() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(bakeBg(), 0, 0);
@@ -787,6 +1154,12 @@ function runEngine(canvas, ctx, overlay) {
     ctx.fillStyle = '#fff'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.fillText('⏱ ' + elapsed.toFixed(1) + 's', 12, 18);
     if (totalCoins > 0) { ctx.textAlign = 'center'; ctx.fillText('🪙 ' + sessionCoins + ' / ' + totalCoins, canvas.width / 2, 18); }
+
+    const cpCount = checkpointHistory.length;
+    if (cpCount > 0) {
+      ctx.fillStyle = '#4caf50'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText('✓ checkpoint ' + cpCount, canvas.width - 10, 18);
+    }
 
     if (doorMsg && doorMsg.timer > 0) {
       const alpha = Math.min(1, doorMsg.timer / 0.4) * Math.min(1, doorMsg.timer);

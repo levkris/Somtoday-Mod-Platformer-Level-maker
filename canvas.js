@@ -4,6 +4,17 @@ const mmCv = document.getElementById('minimap');
 const mmCtx = mmCv.getContext('2d');
 const wrap = document.getElementById('canvas-wrap');
 
+const MAX_OBJECTS = 1000;
+
+function checkLimit(adding) {
+  adding = adding || 1;
+  if (objects.length + adding > MAX_OBJECTS) {
+    toast('Object limit reached (' + MAX_OBJECTS + ')', true);
+    return false;
+  }
+  return true;
+}
+
 const HCUR = { se: 'se-resize', sw: 'sw-resize', ne: 'ne-resize', nw: 'nw-resize', e: 'e-resize', w: 'w-resize', s: 's-resize', n: 'n-resize' };
 
 function setTool(t) {
@@ -137,6 +148,7 @@ canvas.addEventListener('mousedown', e => {
   }
 
   if (e.button === 0 && tool === 'place' && placeType) {
+    if (!checkLimit(1)) return;
     pushUndo();
     const o = defaultObj(placeType);
     o._id = mkId();
@@ -168,6 +180,7 @@ canvas.addEventListener('mousedown', e => {
       if (e.shiftKey) { if (selSet.has(hit)) selSet.delete(hit); else selSet.add(hit); buildProps(); buildHierarchy(); updateSelStatus(); }
       else if (!selSet.has(hit)) { selectOnly(hit); }
       if (selSet.has(hit)) {
+        pushUndo();
         const g = gameRect(hit);
         dragging = true; dragType = 'move';
         ds.cx = sx; ds.cy = sy; ds.ox = g.x; ds.oy = g.y;
@@ -248,12 +261,14 @@ canvas.addEventListener('mousemove', e => {
 
 canvas.addEventListener('mouseup', e => {
   if (dragging) {
-    if (dragType === 'move' || (dragType && dragType.startsWith('r-'))) pushUndo();
     if (dragType === 'box' && boxActive) {
       const found = findInBox(ds.boxX, ds.boxY, ds._boxEndX, ds._boxEndY);
       if (e.shiftKey) found.forEach(o => selSet.add(o));
       else selSet = new Set(found);
       buildProps(); buildHierarchy(); updateSelStatus();
+    }
+    if (dragType === 'move' || (dragType && dragType.startsWith('r-'))) {
+      debouncedSave();
     }
   }
   dragging = false; dragType = null; boxActive = false;
@@ -322,10 +337,10 @@ document.addEventListener('keydown', e => {
 
   if (selSet.size > 0) {
     const N = e.shiftKey ? 10 : 1;
-    if (e.key === 'ArrowLeft') { selSet.forEach(o => { o.x = (o.x || 0) - N; if (o.startX !== undefined) { o.startX -= N; o.endX = (o.endX || 0) - N; } }); updatePropInputs(); render(); }
-    if (e.key === 'ArrowRight') { selSet.forEach(o => { o.x = (o.x || 0) + N; if (o.startX !== undefined) { o.startX += N; o.endX = (o.endX || 0) + N; } }); updatePropInputs(); render(); }
-    if (e.key === 'ArrowUp') { selSet.forEach(o => { o.y = (o.y || 0) + N; if (o.startY !== undefined) { o.startY += N; o.endY = (o.endY || 0) + N; } }); updatePropInputs(); render(); }
-    if (e.key === 'ArrowDown') { selSet.forEach(o => { o.y = (o.y || 0) - N; if (o.startY !== undefined) { o.startY -= N; o.endY = (o.endY || 0) - N; } }); updatePropInputs(); render(); }
+    if (e.key === 'ArrowLeft') { pushUndo(); selSet.forEach(o => { o.x = (o.x || 0) - N; if (o.startX !== undefined) { o.startX -= N; o.endX = (o.endX || 0) - N; } }); updatePropInputs(); render(); }
+    if (e.key === 'ArrowRight') { pushUndo(); selSet.forEach(o => { o.x = (o.x || 0) + N; if (o.startX !== undefined) { o.startX += N; o.endX = (o.endX || 0) + N; } }); updatePropInputs(); render(); }
+    if (e.key === 'ArrowUp') { pushUndo(); selSet.forEach(o => { o.y = (o.y || 0) + N; if (o.startY !== undefined) { o.startY += N; o.endY = (o.endY || 0) + N; } }); updatePropInputs(); render(); }
+    if (e.key === 'ArrowDown') { pushUndo(); selSet.forEach(o => { o.y = (o.y || 0) - N; if (o.startY !== undefined) { o.startY -= N; o.endY = (o.endY || 0) - N; } }); updatePropInputs(); render(); }
   }
 });
 
