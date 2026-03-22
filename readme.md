@@ -1,8 +1,10 @@
 # Level Builder
 
-A browser-based level editor for the **Somtoday Mod Platformer**. Build custom levels, place objects, set up triggers and portals, and export them as XML files ready to load into the game.
+A browser-based level editor for the **[Somtoday Mod](https://github.com/Jona-Zwetsloot/Somtoday-Mod) Platformer**. Build custom levels, place objects, set up triggers and portals, and export them as XML files ready to load into the game.
 
 Open `index.html` in any modern browser — no server or install needed.
+
+
 
 ---
 
